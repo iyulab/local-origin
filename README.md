@@ -124,12 +124,16 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   takes them in.
 - `Files.FileChannel` — the file channel: `PUT` to the page's own address, confined to its folder, limited to the
   paths the host allows, atomic, size-capped; writes discarded for previews; the host told after each write.
+- `Files.ScopeFiles` — static serving of a scope's folder: `GET`/`HEAD` only, confined through `ScopeFolder`, the host
+  deciding which files are served and which render as pages (others: `sandbox` + attachment), host markup injected into
+  pages on the served copy, validators and ranges for the rest, no listings, a plain 404 for closed and missing alike.
+  It applies the security profile itself, because it overrides the policy for files that are not pages; the write
+  channels leave the profile to the host's pipeline.
 - `Origins.ScopeListeners` — a listener per scope for `PortOrigins`, opened and closed while one server runs (each an
   endpoint in the `Kestrel:Endpoints` configuration it supplies); open only once the server reports it, on the remembered
   port when it can, otherwise the first free port of an optional range or one the system picks.
 - `OriginRequests.ScopeOf(HttpRequest)`.
 
-Not yet: static serving of a scope's folder.
 
 ## Deliberately undecided
 

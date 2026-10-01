@@ -94,8 +94,8 @@ public sealed class ScopeListenersTests : IAsyncLifetime
         var notes = await _listeners.OpenAsync(Server, "notes", TestContext.Current.CancellationToken);
         var board = await _listeners.OpenAsync(Server, "board", TestContext.Current.CancellationToken);
 
-        Assert.True(await _listeners.CloseAsync("notes", TestContext.Current.CancellationToken));
-        Assert.False(await _listeners.CloseAsync("notes", TestContext.Current.CancellationToken));
+        Assert.True(await _listeners.CloseAsync(Server, "notes", TestContext.Current.CancellationToken));
+        Assert.False(await _listeners.CloseAsync(Server, "notes", TestContext.Current.CancellationToken));
 
         await Assert.ThrowsAsync<HttpRequestException>(() => GetAsync(notes.Port));
         Assert.Equal("board", await GetAsync(board.Port));

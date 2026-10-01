@@ -24,7 +24,9 @@ namespace LocalOrigin.AspNetCore.Origins;
 /// A listener is open only once the server reports its address; a port that could not be bound never shows up there,
 /// so it counts as taken. A scope keeps its port across restarts through <see cref="IPortMemory"/> and
 /// <see cref="RememberedPort"/>: the remembered port is tried for a moment, and only when it stays taken does the scope
-/// move — the result says so, because every origin that moved lost what the browser kept for it.
+/// move — the result says so, because every origin that moved lost what the browser kept for it. While a remembered
+/// port is still held (often by the host's own previous run, still stopping), the server logs each failed bind as an
+/// error with its stack trace; that is the wait working, not a fault.
 /// </para>
 /// <para>
 /// A listener answers every request that reaches its port; keeping the host's own routes off scope ports (and scope
@@ -74,9 +76,7 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
     {
         ArgumentNullException.ThrowIfNull(server);
         if (!ScopeName.IsValid(scope)) throw new ArgumentException($"'{scope}' is not a valid scope name.", nameof(scope));
-        var addresses = server.Features.Get<IServerAddressesFeature>()
-            ?? throw new InvalidOperationException("The server does not report its addresses.");
-
+        var addresses = AddressesOf(server);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -95,17 +95,24 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
     }
 
     /// <summary>
-    /// Closes <paramref name="scope"/>'s listener and takes its origin away. Its port stays remembered, so opening it
-    /// again brings back the same origin. Returns whether it was open.
+    /// Closes <paramref name="scope"/>'s listener on <paramref name="server"/> and takes its origin away; complete once
+    /// the server no longer reports the listener. Its port stays remembered, so opening it again brings back the same
+    /// origin. Returns whether it was open.
     /// </summary>
-    public async Task<bool> CloseAsync(string scope, CancellationToken cancellationToken = default)
+    /// <exception cref="IOException">The server still reports the listener after <see cref="ScopeListenerOptions.BindTimeout"/>.</exception>
+    public async Task<bool> CloseAsync(IServer server, string scope, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(scope);
+        var addresses = AddressesOf(server);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!Origins.Unbind(scope)) return false;
+            if (!Origins.Bound.TryGetValue(scope, out var port)) return false;
+            Origins.Unbind(scope);
             _provider.Remove(KeyOf(scope));
+            if (!await WaitForAsync(addresses, UrlOf(port), reported: false, cancellationToken).ConfigureAwait(false))
+                throw new IOException($"The listener on port {port} did not close.");
             return true;
         }
         finally
@@ -180,20 +187,26 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
     {
         var url = UrlOf(port);
         _provider.Set(KeyOf(scope), url);
-        var deadline = DateTime.UtcNow + Options.BindTimeout;
-        while (!addresses.Addresses.Any(a => string.Equals(a.TrimEnd('/'), url, StringComparison.OrdinalIgnoreCase)))
-        {
-            if (DateTime.UtcNow >= deadline)
-            {
-                _provider.Remove(KeyOf(scope));
-                throw new IOException($"Port {port} could not be bound.");
-            }
+        if (await WaitForAsync(addresses, url, reported: true, cancellationToken).ConfigureAwait(false)) return port;
+        _provider.Remove(KeyOf(scope));
+        throw new IOException($"Port {port} could not be bound.");
+    }
 
+    /// <summary>Waits up to <see cref="ScopeListenerOptions.BindTimeout"/> for the server to report — or stop reporting — <paramref name="url"/>.</summary>
+    private async Task<bool> WaitForAsync(IServerAddressesFeature addresses, string url, bool reported, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + Options.BindTimeout;
+        while (addresses.Addresses.Any(a => string.Equals(a.TrimEnd('/'), url, StringComparison.OrdinalIgnoreCase)) != reported)
+        {
+            if (DateTime.UtcNow >= deadline) return false;
             await Task.Delay(20, cancellationToken).ConfigureAwait(false);
         }
 
-        return port;
+        return true;
     }
+
+    private static IServerAddressesFeature AddressesOf(IServer server) =>
+        server.Features.Get<IServerAddressesFeature>() ?? throw new InvalidOperationException("The server does not report its addresses.");
 
     private string UrlOf(int port) =>
         Origins.Address.AddressFamily == AddressFamily.InterNetworkV6 ? $"http://[{Origins.Address}]:{port}" : $"http://{Origins.Address}:{port}";

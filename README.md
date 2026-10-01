@@ -2,9 +2,9 @@
 
 > Give a local web page its own origin — serve it, keep what it saves, and try it out before it is trusted.
 
-**Status: first code in place, no release yet (`0.1.0` not published).** This document fixes purpose,
-scope and the principles the implementation must honor. The public surface is not settled; treat
-everything below as subject to change until a first `0.x` package is published.
+**Status: `0.1.0` published on NuGet (`LocalOrigin`, `LocalOrigin.AspNetCore`).** This document fixes
+purpose, scope and the principles the implementation must honor. While the version is `0.x`, a minor
+release may change the public surface.
 
 ---
 

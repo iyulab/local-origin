@@ -109,6 +109,8 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   kept, unreadable files set aside and reported; snapshot format identifier is a host option),
   `DurableFile` (atomic replace, shared reads, set aside).
 - `Previews` — `PreviewOrigins<T>` (throwaway scope names, lifetime, bound), `PreviewReport`.
+- `Files` — `ScopeFolder` (a scope's folder and the one way a request path becomes a file in it: dot segments,
+  backslashes, colons, trailing dots and spaces, device names and links on the way all name nothing).
 
 `LocalOrigin.AspNetCore`
 
@@ -120,9 +122,11 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   Wire names and the global the host reads before closing a page are options.
 - `Previews.ProblemReports` — a script that reports load errors and refused requests, and the endpoint that
   takes them in.
+- `Files.FileChannel` — the file channel: `PUT` to the page's own address, confined to its folder, limited to the
+  paths the host allows, atomic, size-capped; writes discarded for previews; the host told after each write.
 - `OriginRequests.ScopeOf(HttpRequest)`.
 
-Not yet: the file channel, a listener per scope for `PortOrigins`, static serving of a scope's folder.
+Not yet: a listener per scope for `PortOrigins`, static serving of a scope's folder.
 
 ## Deliberately undecided
 

@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LocalOrigin\LocalOrigin.csproj" />
+    <ProjectReference Include="..\..\src\LocalOrigin.AspNetCore\LocalOrigin.AspNetCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

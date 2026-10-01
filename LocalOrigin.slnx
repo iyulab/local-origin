@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LocalOrigin/LocalOrigin.csproj" />
+    <Project Path="src/LocalOrigin.AspNetCore/LocalOrigin.AspNetCore.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/LocalOrigin.Tests/LocalOrigin.Tests.csproj" />

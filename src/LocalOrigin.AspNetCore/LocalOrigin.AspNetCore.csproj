@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Hosting for local-origin on ASP.NET Core: serving a scope's pages with a fixed security profile, the write channels and preview origins.</Description>
+    <PackageTags>localhost;origin;aspnetcore;csp;webview;local-first</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalOrigin\LocalOrigin.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="LocalOrigin.Tests" />
+  </ItemGroup>
+
+</Project>

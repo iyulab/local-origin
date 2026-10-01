@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LocalOrigin/LocalOrigin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LocalOrigin.Tests/LocalOrigin.Tests.csproj" />
+  </Folder>
+</Solution>

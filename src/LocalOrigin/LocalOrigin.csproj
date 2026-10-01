@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Gives a local web page its own origin: origin allocation and persistence, a durable store for what the page saves, and the preview report model. No dependencies.</Description>
+    <PackageTags>localhost;origin;durable;storage;webview;local-first</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="LocalOrigin.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -143,7 +143,7 @@ public sealed partial class StorageChannel
             if (Sessions.Retired(scope, batch.Tab) is { } retired && operations.Any(o => o.Sequence > retired.LastSequence))
             {
                 LogRefusedFromRetiredTab(logger, scope);
-                Options.RefusedFromRetiredTab?.Invoke(context, scope, retired);
+                if (Options.RefusedFromRetiredTab is { } refused) await refused(context, scope, retired).ConfigureAwait(false);
             }
 
             response.StatusCode = StatusCodes.Status403Forbidden;
@@ -166,7 +166,7 @@ public sealed partial class StorageChannel
                 // stops waiting (a closing window) cannot leave it half-applied.
                 await target.ApplyAsync(fresh.Select(o => o.Operation!).ToList(), CancellationToken.None).ConfigureAwait(false);
                 tab.LastSequence = fresh[^1].Sequence;
-                Options.Applied?.Invoke(context, scope, fresh.Count);
+                if (Options.Applied is { } applied) await applied(context, scope, fresh.Count).ConfigureAwait(false);
             }
 
             await WriteAckAsync(response, tab.LastSequence, context.RequestAborted).ConfigureAwait(false);
@@ -267,13 +267,13 @@ public sealed record StorageChannelOptions
     public string HandleName { get; init; } = "__localOrigin";
 
     /// <summary>Called after operations from a page were applied: the request, the scope and how many.</summary>
-    public Action<HttpContext, string, int>? Applied { get; init; }
+    public Func<HttpContext, string, int, ValueTask>? Applied { get; init; }
 
     /// <summary>
     /// Called when a page of a scope whose sessions were revoked (<see cref="ChannelSessions.Revoke"/>) sent writes
     /// that were never applied: the request, the scope and the retired tab. The writes are refused.
     /// </summary>
-    public Action<HttpContext, string, ChannelTab>? RefusedFromRetiredTab { get; init; }
+    public Func<HttpContext, string, ChannelTab, ValueTask>? RefusedFromRetiredTab { get; init; }
 }
 
 /// <summary>Serialization of the channel's wire data.</summary>

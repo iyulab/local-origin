@@ -32,8 +32,16 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
 
         _channel = new StorageChannel(new ChannelSessions(), new StorageChannelOptions
         {
-            Applied = (_, scope, count) => { lock (_applied) _applied.Add((scope, count)); },
-            RefusedFromRetiredTab = (_, scope, tab) => { lock (_refused) _refused.Add((scope, tab.LastSequence)); },
+            Applied = (_, scope, count) =>
+            {
+                lock (_applied) _applied.Add((scope, count));
+                return ValueTask.CompletedTask;
+            },
+            RefusedFromRetiredTab = (_, scope, tab) =>
+            {
+                lock (_refused) _refused.Add((scope, tab.LastSequence));
+                return ValueTask.CompletedTask;
+            },
         });
 
         var builder = WebApplication.CreateSlimBuilder();

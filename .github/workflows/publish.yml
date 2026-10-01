@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      id-token: write   # OIDC token for NuGet Trusted Publishing
       contents: write   # push the version tag
 
     steps:
@@ -76,16 +75,9 @@ jobs:
         done
         [ "$missing" -eq 0 ]
 
-    - name: NuGet login (OIDC → short-lived API key)
-      if: steps.check_tag.outputs.exists == 'false'
-      id: nuget_login
-      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841  # v1.2.0
-      with:
-        user: ${{ secrets.NUGET_USER }}
-
     - name: Push to NuGet
       if: steps.check_tag.outputs.exists == 'false'
-      run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ steps.nuget_login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
     - name: Tag the version
       if: steps.check_tag.outputs.exists == 'false'

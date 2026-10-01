@@ -2,9 +2,9 @@
 
 > Give a local web page its own origin — serve it, keep what it saves, and try it out before it is trusted.
 
-**Status: early design — no releases.** This document fixes purpose, scope and the principles the
-implementation must honor. The public surface is not settled; treat everything below as subject to
-change until a first `0.x` package is published.
+**Status: first code in place, no release yet (`0.1.0` not published).** This document fixes purpose,
+scope and the principles the implementation must honor. The public surface is not settled; treat
+everything below as subject to change until a first `0.x` package is published.
 
 ---
 
@@ -86,19 +86,47 @@ These are the anchors. An implementation that violates one of them is not local-
 6. **No knowledge of its consumers.** Nothing here names or special-cases an application that uses it.
    A need that only one consumer has stays in that consumer.
 
-## Packages (planned)
+## Packages
 
 | Package | Contents |
 |---|---|
 | `LocalOrigin` | Core with no dependencies: origin allocation and persistence, the durable store, the preview report model. |
-| `LocalOrigin.AspNetCore` | Hosting on ASP.NET Core: endpoints per origin, the security header profile, the write channels, preview origins. |
+| `LocalOrigin.AspNetCore` | Hosting on ASP.NET Core: the security header profile, document injection, the write channels, preview origins. |
 
 Target: .NET 10. Nullable reference types and warnings-as-errors are on.
 
+### What exists so far
+
+`LocalOrigin`
+
+- `Origins` — `IOriginStrategy` (a scope's origin; the scope a request names, from its host name and local
+  port), `SubdomainOrigins`, `PortOrigins` (`Bind`/`Unbind` a scope to the port its listener got),
+  `ScopeName` (DNS-label names), `IPortMemory` / `PortMemoryFile`, `RememberedPort.StartAsync` (start on the
+  remembered port, retry briefly, otherwise move and report the move).
+- `Storage` — `KeyValueStore` (journal flushed before acknowledgement, atomic snapshots, previous snapshots
+  kept, unreadable files set aside and reported; snapshot format identifier is a host option),
+  `DurableFile` (atomic replace, shared reads, set aside).
+- `Previews` — `PreviewOrigins<T>` (throwaway scope names, lifetime, bound), `PreviewReport`.
+
+`LocalOrigin.AspNetCore`
+
+- `OriginSecurityProfile` — the header set of every response, and refusal of requests other sites (sibling
+  origins included) make, navigation excepted.
+- `DocumentInjector` — host markup after the doctype of the served copy; stored bytes and declared charset kept.
+- `Storage.StorageChannel` / `ChannelSessions` — the storage channel: the opt-in script, sessions and tabs,
+  writes applied once, writes from revoked pages refused and reported, writes discarded for previews.
+  Wire names and the global the host reads before closing a page are options.
+- `Previews.ProblemReports` — a script that reports load errors and refused requests, and the endpoint that
+  takes them in.
+- `OriginRequests.ScopeOf(HttpRequest)`.
+
+Not yet: the file channel, a listener per scope for `PortOrigins`, static serving of a scope's folder.
+
 ## Deliberately undecided
 
-- The shape of the host-facing API (registration of scopes, callbacks for writes and reports).
-- The on-disk layout of a scope's store.
+- How scopes are registered and looked up — today the host resolves a scope and hands the library its
+  store and documents; whether the library should own a registry is open.
+- The on-disk layout of a scope's store, and how the file channel and the key-value store share it.
 - Whether the storage-channel script also ships as an npm package.
 - Authentication for an origin opened beyond loopback.
 

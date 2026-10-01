@@ -124,9 +124,12 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   takes them in.
 - `Files.FileChannel` — the file channel: `PUT` to the page's own address, confined to its folder, limited to the
   paths the host allows, atomic, size-capped; writes discarded for previews; the host told after each write.
+- `Origins.ScopeListeners` — a listener per scope for `PortOrigins`, opened and closed while one server runs (each an
+  endpoint in the `Kestrel:Endpoints` configuration it supplies); open only once the server reports it, on the remembered
+  port when it can, otherwise the first free port of an optional range or one the system picks.
 - `OriginRequests.ScopeOf(HttpRequest)`.
 
-Not yet: a listener per scope for `PortOrigins`, static serving of a scope's folder.
+Not yet: static serving of a scope's folder.
 
 ## Deliberately undecided
 

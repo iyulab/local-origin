@@ -114,6 +114,10 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
 
 `LocalOrigin.AspNetCore`
 
+- `ScopeOrigins.UseScopeOrigins(strategy, handle)` — scope traffic is terminal: a request naming a scope is answered by
+  the host's scope handler only (never by the host's own routes), with the profile on the response and cross-site
+  requests refused; a request on a port the strategy owns that names no scope (a rebound name) gets 421.
+  `IOriginStrategy.OwnsPort` says which ports those are (`PortOrigins`: the bound ones).
 - `OriginSecurityProfile` — the header set of every response, and refusal of requests other sites (sibling
   origins included) make, navigation excepted.
 - `DocumentInjector` — host markup after the doctype of the served copy; stored bytes and declared charset kept.

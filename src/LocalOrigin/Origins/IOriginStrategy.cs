@@ -18,4 +18,11 @@ public interface IOriginStrategy
     /// naming any other host — including a public name rebound to the loopback address — names no scope.
     /// </summary>
     string? ScopeOf(string hostName, int localPort);
+
+    /// <summary>
+    /// Whether <paramref name="localPort"/> is one this strategy opened for scopes — so a request arriving on it that names
+    /// no scope (another host name, say a public name rebound to the loopback address) is not the host's own traffic either.
+    /// <see langword="false"/> by default: a strategy whose ports the host shares answers no.
+    /// </summary>
+    bool OwnsPort(int localPort) => false;
 }

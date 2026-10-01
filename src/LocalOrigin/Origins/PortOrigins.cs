@@ -85,4 +85,11 @@ public sealed class PortOrigins : IOriginStrategy
         if (!named) return null;
         lock (_lock) return _scopes.GetValueOrDefault(localPort);
     }
+
+    /// <inheritdoc />
+    /// <remarks>A port is owned while a scope is bound to it.</remarks>
+    public bool OwnsPort(int localPort)
+    {
+        lock (_lock) return _scopes.ContainsKey(localPort);
+    }
 }

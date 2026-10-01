@@ -139,11 +139,13 @@ public sealed partial class StorageChannel
         if (tab is null)
         {
             // A page of this scope whose code was replaced while it was still writing: its write is refused —
-            // the new code owns the data now — but it was a write the person made, so the host is told.
-            if (Sessions.Retired(scope, batch.Tab) is { } retired && operations.Any(o => o.Sequence > retired.LastSequence))
+            // the new code owns the data now — but it was a write the person made, so the host is handed what
+            // was never applied, to keep aside or to count.
+            if (Sessions.Retired(scope, batch.Tab) is { } retired
+                && operations.Where(o => o.Sequence > retired.LastSequence).OrderBy(o => o.Sequence).Select(o => o.Operation!).ToList() is { Count: > 0 } unapplied)
             {
                 LogRefusedFromRetiredTab(logger, scope);
-                if (Options.RefusedFromRetiredTab is { } refused) await refused(context, scope, retired).ConfigureAwait(false);
+                if (Options.RefusedFromRetiredTab is { } refused) await refused(new RefusedWrite(context, scope, retired, unapplied)).ConfigureAwait(false);
             }
 
             response.StatusCode = StatusCodes.Status403Forbidden;
@@ -246,6 +248,13 @@ public sealed partial class StorageChannel
 /// <param name="Script">The script — no <c>&lt;script&gt;</c> element around it; ASCII.</param>
 public sealed record ChannelPage(string Tab, string Script);
 
+/// <summary>Writes from a page whose sessions were revoked, refused by the <see cref="StorageChannel"/>.</summary>
+/// <param name="Context">The request that carried them.</param>
+/// <param name="Scope">The scope the page belonged to.</param>
+/// <param name="Tab">The page's retired tab.</param>
+/// <param name="Operations">The operations never applied, in the order the page made them.</param>
+public sealed record RefusedWrite(HttpContext Context, string Scope, ChannelTab Tab, IReadOnlyList<KeyValueOperation> Operations);
+
 /// <summary>Names on the wire of the <see cref="StorageChannel"/>, and what the host is told.</summary>
 public sealed record StorageChannelOptions
 {
@@ -271,9 +280,11 @@ public sealed record StorageChannelOptions
 
     /// <summary>
     /// Called when a page of a scope whose sessions were revoked (<see cref="ChannelSessions.Revoke"/>) sent writes
-    /// that were never applied: the request, the scope and the retired tab. The writes are refused.
+    /// that were never applied. The writes are refused — the scope's new code owns its data — and handed to the
+    /// host, which decides whether to keep them aside, count them, or both. A resend of what was already applied
+    /// is not reported.
     /// </summary>
-    public Func<HttpContext, string, ChannelTab, ValueTask>? RefusedFromRetiredTab { get; init; }
+    public Func<RefusedWrite, ValueTask>? RefusedFromRetiredTab { get; init; }
 }
 
 /// <summary>Serialization of the channel's wire data.</summary>

@@ -21,7 +21,7 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
     private readonly string _directory = Directory.CreateTempSubdirectory("local-origin-channel-").FullName;
     private readonly Dictionary<string, KeyValueStore> _stores = new(StringComparer.Ordinal);
     private readonly List<(string Scope, int Count)> _applied = [];
-    private readonly List<(string Scope, long Last)> _refused = [];
+    private readonly List<(string Scope, long Last, int Unapplied)> _refused = [];
     private WebApplication _app = null!;
     private StorageChannel _channel = null!;
 
@@ -37,9 +37,9 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
                 lock (_applied) _applied.Add((scope, count));
                 return ValueTask.CompletedTask;
             },
-            RefusedFromRetiredTab = (_, scope, tab) =>
+            RefusedFromRetiredTab = refused =>
             {
-                lock (_refused) _refused.Add((scope, tab.LastSequence));
+                lock (_refused) _refused.Add((refused.Scope, refused.Tab.LastSequence, refused.Operations.Count));
                 return ValueTask.CompletedTask;
             },
         });
@@ -212,8 +212,8 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1")))).StatusCode);
         Assert.Empty(_refused); // a resend of what was applied is no loss
-        Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(page.Tab, Set(2, "a", "2")))).StatusCode);
-        Assert.Equal([("notes", 1L)], _refused);
+        Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"), Set(2, "a", "2")))).StatusCode);
+        Assert.Equal([("notes", 1L, 1)], _refused); // only what was never applied is handed over
         Assert.Equal("1", _stores["notes"].GetItems()["a"]);
     }
 

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Storage\storage-channel.js" LogicalName="LocalOrigin.AspNetCore.storage-channel.js" />
+    <EmbeddedResource Include="Previews\problem-report.js" LogicalName="LocalOrigin.AspNetCore.problem-report.js" />
   </ItemGroup>
 
   <ItemGroup>

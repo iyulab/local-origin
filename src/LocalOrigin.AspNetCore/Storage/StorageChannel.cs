@@ -86,14 +86,14 @@ public sealed partial class StorageChannel
     public bool IsFromThePage(HttpRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return request.Headers[Options.RequestHeader] == "1" && SameOriginOrAbsent(request);
+        return PageRequests.IsFromThePage(request, Options.RequestHeader);
     }
 
     /// <summary>Whether <paramref name="context"/> carries a session of <paramref name="scope"/>, from a page of the origin it was sent to.</summary>
     public bool IsFromTheScope(HttpContext context, string scope)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return Sessions.IsSession(scope, context.Request.Cookies[Options.SessionCookie]) && SameOriginOrAbsent(context.Request);
+        return Sessions.IsSession(scope, context.Request.Cookies[Options.SessionCookie]) && PageRequests.SameOriginOrAbsent(context.Request);
     }
 
     /// <summary>The tab named by a request, if it and the request's session both belong to <paramref name="scope"/>.</summary>
@@ -217,12 +217,6 @@ public sealed partial class StorageChannel
     {
         response.ContentType = "application/json";
         return response.WriteAsync($$"""{"ack":{{ack}}}""", cancellationToken);
-    }
-
-    private static bool SameOriginOrAbsent(HttpRequest request)
-    {
-        var origin = request.Headers.Origin.ToString();
-        return origin.Length == 0 || string.Equals(origin, $"{request.Scheme}://{request.Host}", StringComparison.OrdinalIgnoreCase);
     }
 
     private static (long Sequence, KeyValueOperation? Operation) ToOperation(WireOperation wire) =>

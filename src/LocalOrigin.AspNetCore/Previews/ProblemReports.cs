@@ -7,13 +7,14 @@ namespace LocalOrigin.AspNetCore.Previews;
 
 /// <summary>
 /// Problem reporting: a script placed in front of a page (<see cref="Script"/>) reports the errors its own code
-/// throws while loading and what the content security policy refuses, and <see cref="ReceiveAsync"/> takes
-/// those reports in. A preview adds them to its <see cref="PreviewReport"/> (<see cref="AddTo"/>); a host can
+/// throws — while loading, and afterwards — the errors it reports itself with <c>console.error</c>, and what
+/// the content security policy refuses, and <see cref="ReceiveAsync"/> takes those reports in. A preview adds them to its <see cref="PreviewReport"/> (<see cref="AddTo"/>); a host can
 /// also take them for the pages people use, to tell the person what stopped one.
 /// </summary>
 /// <remarks>
 /// Wire: <c>POST</c> to <see cref="ProblemReportOptions.Path"/> with
-/// <c>{ "tab": "...", "kind": "load-error", "message": "..." }</c> or
+/// <c>{ "tab": "...", "kind": "load-error", "message": "..." }</c>,
+/// <c>{ "tab": "...", "kind": "error", "message": "..." }</c> or
 /// <c>{ "tab": "...", "kind": "blocked", "category": "library" | "data" | "form", "host": "..." }</c>,
 /// answered with <c>{}</c> — 200 with a body rather than 204: a fetch answered with 204 was observed to keep a
 /// Chromium-family browser from shutting down cleanly.
@@ -86,7 +87,9 @@ public sealed class ProblemReports
         PageProblem? problem = wire switch
         {
             { Tab: not null, Kind: "load-error", Message: { Length: > 0 } message } =>
-                new PageLoadError(wire.Tab, message.Length > MaxMessageLength ? message[..MaxMessageLength] : message),
+                new PageLoadError(wire.Tab, Bounded(message)),
+            { Tab: not null, Kind: "error", Message: { Length: > 0 } message } =>
+                new PageError(wire.Tab, Bounded(message)),
             { Tab: not null, Kind: "blocked", Host: { Length: > 0 and <= 255 } host } when ParseCategory(wire.Category) is { } category =>
                 new PageBlocked(wire.Tab, new BlockedRequest(category, host)),
             _ => null,
@@ -109,10 +112,13 @@ public sealed class ProblemReports
         switch (problem)
         {
             case PageLoadError error: report.AddError(error.Message); break;
+            case PageError error: report.AddError(error.Message); break;
             case PageBlocked blocked: report.AddBlocked(blocked.Blocked); break;
             default: throw new ArgumentException("Unknown problem.", nameof(problem));
         }
     }
+
+    private static string Bounded(string message) => message.Length > MaxMessageLength ? message[..MaxMessageLength] : message;
 
     private static BlockedCategory? ParseCategory(string? category) => category switch
     {
@@ -132,6 +138,12 @@ public abstract record PageProblem(string Tab);
 
 /// <summary>An error the page's own code threw while loading, with lines counted as in the page's file.</summary>
 public sealed record PageLoadError(string Tab, string Message) : PageProblem(Tab);
+
+/// <summary>
+/// An error after the page loaded — one its own code threw (lines counted as in the page's file), or one it
+/// reported with <c>console.error</c>, at any time. The page started; something it does went wrong.
+/// </summary>
+public sealed record PageError(string Tab, string Message) : PageProblem(Tab);
 
 /// <summary>Something the content security policy refused.</summary>
 public sealed record PageBlocked(string Tab, BlockedRequest Blocked) : PageProblem(Tab);

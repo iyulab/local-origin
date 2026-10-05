@@ -1,7 +1,7 @@
 namespace LocalOrigin.Previews;
 
 /// <summary>
-/// What went wrong while a page was tried out: errors its own code threw while loading, and what the
+/// What went wrong while a page was tried out: errors its own code threw or reported, and what the
 /// content security policy refused. Collected while the page is served; read by the host afterwards.
 /// Bounded, and without repeats, so a page that fails in a loop cannot grow it.
 /// </summary>
@@ -14,7 +14,9 @@ public sealed class PreviewReport
     private readonly List<string> _errors = [];
     private readonly List<BlockedRequest> _blocked = [];
 
-    /// <summary>Errors thrown while the page loaded, with lines counted as in the page's own file.</summary>
+    /// <summary>
+    /// Errors its own code threw (lines counted as in the page's own file) or reported with <c>console.error</c>.
+    /// </summary>
     public IReadOnlyList<string> Errors
     {
         get { lock (_lock) return [.. _errors]; }

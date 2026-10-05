@@ -53,7 +53,7 @@ wrong. local-origin is that layer, once.
   - *storage channel* — an opt-in script mirrors `localStorage` to the store, for pages that were never
     written for any host and only know `localStorage`.
 - **Preview origins.** A throwaway origin for a candidate version of a page: it reads the current data,
-  its writes are acknowledged and discarded, and its load errors and policy violations are collected
+  its writes are acknowledged and discarded, and its errors and policy violations are collected
   into a report the host reads afterwards. How the preview is driven — a headless browser, an off-screen
   view — is the host's choice; local-origin supplies the origin and the report.
 
@@ -124,8 +124,8 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
 - `Storage.StorageChannel` / `ChannelSessions` — the storage channel: the opt-in script, sessions and tabs,
   writes applied once, writes from revoked pages refused and reported, writes discarded for previews.
   Wire names and the global the host reads before closing a page are options.
-- `Previews.ProblemReports` — a script that reports load errors and refused requests, and the endpoint that
-  takes them in.
+- `Previews.ProblemReports` — a script that reports the page's errors (thrown while loading, thrown afterwards,
+  or reported with `console.error`) and refused requests, and the endpoint that takes them in.
 - `Files.FileChannel` — the file channel: `PUT` to the page's own address, confined to its folder, limited to the
   paths the host allows, atomic, size-capped; writes discarded for previews; the host told after each write.
 - `Files.ScopeFiles` — static serving of a scope's folder: `GET`/`HEAD` only, confined through `ScopeFolder`, the host

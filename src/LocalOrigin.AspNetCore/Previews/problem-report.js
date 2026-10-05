@@ -6,6 +6,8 @@
 //    displayed is "data". This also catches an inline module whose import comes from a CDN, which
 //    raises no useful error of its own.
 //  - load-error: the page's own code failed while loading.
+//  - error: the page's own code failed after it loaded (an uncaught error or rejection, say on a click),
+//    or the page reported an error itself with console.error, at any time.
 //
 // This file must stay ASCII: it is spliced into documents of any ASCII-compatible encoding.
 (function () {
@@ -48,9 +50,13 @@
   });
 
   var loading = true;
+  // An error thrown while the page loads stopped it from starting; one thrown later broke one thing it does.
+  function onError(message) {
+    if (!message) return;
+    reportOnce("error " + message, loading ? "load-error" : "error", String(message).slice(0, 500));
+  }
   function onLoadError(message) {
-    if (!loading || !message) return;
-    reportOnce("error " + message, "load-error", String(message).slice(0, 500));
+    if (loading) onError(message);
   }
   // Capturing on window also sees resources that failed to load, which do not bubble.
   window.addEventListener("error", function (event) {
@@ -67,11 +73,28 @@
     if (!event.message) return;
     // Line numbers in the document count the injected markup too; report them as the page's file has them.
     var line = event.lineno && event.filename === location.href ? event.lineno - boot.lineOffset : event.lineno;
-    onLoadError(event.message + (line > 0 ? " (line " + line + ")" : ""));
+    onError(event.message + (line > 0 ? " (line " + line + ")" : ""));
   }, true);
   window.addEventListener("unhandledrejection", function (event) {
     var reason = event.reason;
-    onLoadError(reason && reason.message ? reason.message : String(reason));
+    onError(reason && reason.message ? reason.message : String(reason));
   });
+
+  // What the page itself reports as an error. The console still gets it as before.
+  function text(value) {
+    if (value instanceof Error) return value.message ? value.name + ": " + value.message : value.name;
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value); } catch (e) { return String(value); }
+  }
+  var nativeError = console.error;
+  console.error = function () {
+    try {
+      var parts = [];
+      for (var i = 0; i < arguments.length; i++) parts.push(text(arguments[i]));
+      var message = parts.join(" ");
+      if (message) reportOnce("error " + message, "error", message.slice(0, 500));
+    } catch (e) { /* reporting is best-effort */ }
+    return nativeError.apply(console, arguments);
+  };
   window.addEventListener("load", function () { setTimeout(function () { loading = false; }, 1000); });
 })();

@@ -126,6 +126,19 @@ public sealed class PreviewTests
     }
 
     [Fact]
+    public async Task An_error_after_loading_is_its_own_kind_and_goes_into_the_preview_report()
+    {
+        var problems = new ProblemReports();
+        var report = new PreviewReport();
+
+        var error = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"error","message":"Cannot save: quota"}"""));
+        ProblemReports.AddTo(report, error!);
+
+        Assert.Equal(new PageError("t", "Cannot save: quota"), error);
+        Assert.Equal(["Cannot save: quota"], report.Errors);
+    }
+
+    [Fact]
     public async Task A_report_is_answered_with_a_body()
     {
         var context = Post("""{"tab":"t","kind":"load-error","message":"boom"}""");
@@ -143,6 +156,8 @@ public sealed class PreviewTests
         var problem = await new ProblemReports().ReceiveAsync(Post($$"""{"tab":"t","kind":"load-error","message":"{{new string('x', 900)}}"}"""));
 
         Assert.Equal(ProblemReports.MaxMessageLength, ((PageLoadError)problem!).Message.Length);
+        var error = await new ProblemReports().ReceiveAsync(Post($$"""{"tab":"t","kind":"error","message":"{{new string('x', 900)}}"}"""));
+        Assert.Equal(ProblemReports.MaxMessageLength, ((PageError)error!).Message.Length);
     }
 
     [Theory]
@@ -150,6 +165,7 @@ public sealed class PreviewTests
     [InlineData("""{"tab":"t","kind":"blocked","category":"other","host":"a"}""", 400)]
     [InlineData("""{"tab":"t","kind":"blocked","category":"data","host":""}""", 400)]
     [InlineData("""{"kind":"load-error","message":"m"}""", 400)]
+    [InlineData("""{"tab":"t","kind":"error","message":""}""", 400)]
     [InlineData("not json", 400)]
     public async Task Malformed_reports_are_refused(string body, int status)
     {
@@ -181,5 +197,6 @@ public sealed class PreviewTests
         Assert.Contains("\"lineOffset\":7", script, StringComparison.Ordinal);
         Assert.Contains("\"endpoint\":\"/.local-origin/problems\"", script, StringComparison.Ordinal);
         Assert.DoesNotContain("__LOCAL_ORIGIN_PROBLEMS__", script, StringComparison.Ordinal);
+        Assert.Contains("console.error = function", script, StringComparison.Ordinal);
     }
 }

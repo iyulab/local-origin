@@ -2,7 +2,7 @@
 
 > Give a local web page its own origin — serve it, keep what it saves, and try it out before it is trusted.
 
-**Status: `0.2.0` published on NuGet (`LocalOrigin`, `LocalOrigin.AspNetCore`).** This document fixes
+**Status: `0.3.0` published on NuGet (`LocalOrigin`, `LocalOrigin.AspNetCore`).** This document fixes
 purpose, scope and the principles the implementation must honor. While the version is `0.x`, a minor
 release may change the public surface.
 
@@ -108,7 +108,7 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
 - `Storage` — `KeyValueStore` (journal flushed before acknowledgement, atomic snapshots, previous snapshots
   kept, unreadable files set aside and reported; snapshot format identifier is a host option),
   `DurableFile` (atomic replace, shared reads, set aside).
-- `Previews` — `PreviewOrigins<T>` (throwaway scope names, lifetime, bound), `PreviewReport`.
+- `Previews` — `PreviewOrigins<T>` (throwaway scope names, a lifetime that is fixed or renewed on use, bound), `PreviewReport`.
 - `Files` — `ScopeFolder` (a scope's folder and the one way a request path becomes a file in it: dot segments,
   backslashes, colons, trailing dots and spaces, device names and links on the way all name nothing).
 

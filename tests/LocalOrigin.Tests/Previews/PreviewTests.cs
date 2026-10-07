@@ -56,6 +56,56 @@ public sealed class PreviewTests
     }
 
     [Fact]
+    public void A_preview_that_renews_on_use_lives_while_it_is_found()
+    {
+        var clock = new Clock();
+        var previews = new PreviewOrigins<string>(new PreviewOptions { Lifetime = TimeSpan.FromMinutes(2), RenewOnUse = true }, clock);
+        var preview = previews.Create("a");
+
+        for (var i = 0; i < 5; i++)
+        {
+            clock.Now += TimeSpan.FromMinutes(1);
+            Assert.NotNull(previews.Find(preview.Scope));
+        }
+
+        Assert.Equal(preview.Created + TimeSpan.FromMinutes(5), preview.LastUsed);
+        clock.Now += TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(1);
+        Assert.Null(previews.Find(preview.Scope));
+    }
+
+    [Fact]
+    public void Finding_a_preview_does_not_renew_it_by_default()
+    {
+        var clock = new Clock();
+        var previews = new PreviewOrigins<string>(new PreviewOptions { Lifetime = TimeSpan.FromMinutes(2) }, clock);
+        var preview = previews.Create("a");
+
+        clock.Now += TimeSpan.FromMinutes(1);
+        Assert.NotNull(previews.Find(preview.Scope));
+        Assert.Equal(preview.Created, preview.LastUsed);
+        clock.Now += TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1);
+        Assert.Null(previews.Find(preview.Scope));
+    }
+
+    [Fact]
+    public void Too_many_previews_push_out_the_least_recently_used()
+    {
+        var clock = new Clock();
+        var previews = new PreviewOrigins<int>(new PreviewOptions { MaxPreviews = 2, RenewOnUse = true }, clock);
+        var first = previews.Create(1);
+        clock.Now += TimeSpan.FromSeconds(1);
+        var second = previews.Create(2);
+        clock.Now += TimeSpan.FromSeconds(1);
+        Assert.NotNull(previews.Find(first.Scope));
+        clock.Now += TimeSpan.FromSeconds(1);
+        var third = previews.Create(3);
+
+        Assert.NotNull(previews.Find(first.Scope));
+        Assert.Null(previews.Find(second.Scope));
+        Assert.NotNull(previews.Find(third.Scope));
+    }
+
+    [Fact]
     public void Too_many_previews_push_out_the_oldest()
     {
         var clock = new Clock();

@@ -24,8 +24,10 @@ public static class ScopeOrigins
     /// host serves there. The profile's headers are already on the response; a handler may override them for its own
     /// responses (<see cref="Files.ScopeFiles"/> does, for files that do not render as pages).</param>
     /// <param name="profile">The headers every scope response carries and which requests are refused; the default when null.</param>
+    /// <param name="activity">When given, counts each request the handler answers as in flight for its scope until the handler
+    /// is done — what a driver reads to tell when a page has settled (<see cref="ScopeActivity"/>).</param>
     public static IApplicationBuilder UseScopeOrigins(this IApplicationBuilder app, IOriginStrategy strategy,
-        Func<HttpContext, string, Task> handle, OriginSecurityProfile? profile = null)
+        Func<HttpContext, string, Task> handle, OriginSecurityProfile? profile = null, ScopeActivity? activity = null)
     {
         ArgumentNullException.ThrowIfNull(app);
         ArgumentNullException.ThrowIfNull(strategy);
@@ -55,7 +57,8 @@ public static class ScopeOrigins
                 return;
             }
 
-            await handle(context, scope).ConfigureAwait(false);
+            using (activity?.Begin(scope))
+                await handle(context, scope).ConfigureAwait(false);
         });
     }
 }

@@ -118,6 +118,9 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   the host's scope handler only (never by the host's own routes), with the profile on the response and cross-site
   requests refused; a request on a port the strategy owns that names no scope (a rebound name) gets 421.
   `IOriginStrategy.OwnsPort` says which ports those are (`PortOrigins`: the bound ones).
+  Given a `ScopeActivity`, it counts each request the handler answers as in flight for its scope: how many are
+  pending and when that last changed — «nothing pending since T», for telling when a page has settled instead of
+  waiting a fixed time (an open event stream counts as pending; `ScopeActivityState.IsSettled` takes how many to allow).
 - `OriginSecurityProfile` — the header set of every response, and refusal of requests other sites (sibling
   origins included) make, navigation excepted.
 - `DocumentInjector` — host markup after the doctype of the served copy; stored bytes and declared charset kept.

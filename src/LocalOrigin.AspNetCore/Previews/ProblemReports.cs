@@ -117,8 +117,8 @@ public sealed class ProblemReports
         ArgumentNullException.ThrowIfNull(report);
         switch (problem)
         {
-            case PageLoadError error: report.AddError(error.Message); break;
-            case PageError error: report.AddError(error.Message); break;
+            case PageLoadError error: report.AddError(error.Message, whileLoading: true, error.Source, error.Position); break;
+            case PageError error: report.AddError(error.Message, whileLoading: false, error.Source, error.Position); break;
             case PageBlocked blocked: report.AddBlocked(blocked.Blocked); break;
             default: throw new ArgumentException("Unknown problem.", nameof(problem));
         }
@@ -181,28 +181,6 @@ public sealed record PageError(string Tab, string Message) : PageProblem(Tab)
     /// <summary>Where in the code, when the browser gave it.</summary>
     public SourcePosition? Position { get; init; }
 }
-
-/// <summary>Where a page's error came from.</summary>
-public enum ErrorSource
-{
-    /// <summary>An error its code threw and nothing caught.</summary>
-    Uncaught,
-
-    /// <summary>A promise its code rejected and nothing handled.</summary>
-    Rejection,
-
-    /// <summary>An error the page reported itself with <c>console.error</c>.</summary>
-    Console,
-
-    /// <summary>A script, style sheet or other file from another host that could not be loaded.</summary>
-    Resource,
-}
-
-/// <summary>Where in a page's code an error was thrown.</summary>
-/// <param name="Line">The line, counted as in that file (1-based) — for the page's own file, without the markup placed in front of it.</param>
-/// <param name="Column">The column (1-based), when the browser gave it.</param>
-/// <param name="File">The path of another file of the page's origin (<c>/app.js</c>), or <see langword="null"/> for the page's own file.</param>
-public sealed record SourcePosition(int Line, int? Column = null, string? File = null);
 
 /// <summary>Something the content security policy refused.</summary>
 public sealed record PageBlocked(string Tab, BlockedRequest Blocked) : PageProblem(Tab);

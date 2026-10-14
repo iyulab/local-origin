@@ -26,6 +26,8 @@ public sealed class PreviewOrigins<T>
         _time = time ?? TimeProvider.System;
         if (!Origins.ScopeName.IsValid(Options.NamePrefix + new string('0', TokenLength)))
             throw new ArgumentException("The name prefix does not make valid scope names.", nameof(options));
+        if (Options.MaxReportEntries < 1)
+            throw new ArgumentException("A report must keep at least one entry.", nameof(options));
     }
 
     private const int TokenLength = 32;
@@ -39,7 +41,7 @@ public sealed class PreviewOrigins<T>
     public Preview<T> Create(T content)
     {
         var name = Options.NamePrefix + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(TokenLength / 2));
-        var preview = new Preview<T>(name, content, _time.GetUtcNow());
+        var preview = new Preview<T>(name, content, _time.GetUtcNow(), new PreviewReport(Options.MaxReportEntries, _time));
         lock (_lock)
         {
             Sweep();
@@ -93,12 +95,13 @@ public sealed class PreviewOrigins<T>
 /// <typeparam name="T">What the host keeps with it.</typeparam>
 public sealed class Preview<T>
 {
-    internal Preview(string scope, T content, DateTimeOffset created)
+    internal Preview(string scope, T content, DateTimeOffset created, PreviewReport report)
     {
         Scope = scope;
         Content = content;
         Created = created;
         LastUsed = created;
+        Report = report;
     }
 
     /// <summary>The preview's scope name: its origin, under the host's strategy.</summary>
@@ -117,7 +120,7 @@ public sealed class Preview<T>
     public DateTimeOffset LastUsed { get; internal set; }
 
     /// <summary>What went wrong while it was served.</summary>
-    public PreviewReport Report { get; } = new();
+    public PreviewReport Report { get; }
 }
 
 /// <summary>Naming, lifetime and bounds of <see cref="PreviewOrigins{T}"/>.</summary>
@@ -138,4 +141,10 @@ public sealed record PreviewOptions
 
     /// <summary>How many previews are held at once.</summary>
     public int MaxPreviews { get; init; } = 8;
+
+    /// <summary>
+    /// How many entries each preview's report keeps. A load that is checked once needs few; a driver that clicks
+    /// through a page for a while may want more.
+    /// </summary>
+    public int MaxReportEntries { get; init; } = PreviewReport.DefaultMaxEntries;
 }

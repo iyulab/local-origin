@@ -143,7 +143,66 @@ public sealed class PreviewTests
 
         Assert.Equal("x is not defined (line 3)", report.Errors[0]);
         Assert.Equal([new BlockedRequest(BlockedCategory.Library, "cdn.example")], report.Blocked);
-        Assert.Equal(PreviewReport.MaxEntries, report.Errors.Count + report.Blocked.Count);
+        Assert.Equal(PreviewReport.DefaultMaxEntries, report.Errors.Count + report.Blocked.Count);
+        Assert.Equal(52 - PreviewReport.DefaultMaxEntries, report.Dropped);
+    }
+
+    [Fact]
+    public void A_report_can_be_read_in_arrival_order_and_from_where_a_reader_left_off()
+    {
+        var clock = new Clock();
+        var report = new PreviewReport(time: clock);
+        var start = clock.Now;
+
+        report.AddError("x is not defined (line 3)", whileLoading: true, ErrorSource.Uncaught, new SourcePosition(3, 9));
+        clock.Now += TimeSpan.FromMilliseconds(400);
+        report.AddBlocked(new BlockedRequest(BlockedCategory.Data, "api.example"));
+        var seen = report.Entries.Count;
+        clock.Now += TimeSpan.FromSeconds(2);
+        report.AddError("Cannot save", whileLoading: false, ErrorSource.Console);
+
+        Assert.Equal(
+            [
+                new PreviewError(0, start, "x is not defined (line 3)", true, ErrorSource.Uncaught, new SourcePosition(3, 9)),
+                new PreviewRefusal(1, start.AddMilliseconds(400), new BlockedRequest(BlockedCategory.Data, "api.example")),
+                new PreviewError(2, start.AddMilliseconds(2400), "Cannot save", false, ErrorSource.Console),
+            ],
+            report.Entries);
+        Assert.Equal([new PreviewError(2, start.AddMilliseconds(2400), "Cannot save", false, ErrorSource.Console)], report.Since(seen));
+        Assert.Empty(report.Since(3));
+        Assert.Empty(report.Since(99));
+        Assert.Equal(["x is not defined (line 3)", "Cannot save"], report.Errors);
+    }
+
+    [Fact]
+    public async Task A_report_taken_in_keeps_whether_it_was_loading_where_it_came_from_and_where()
+    {
+        var problems = new ProblemReports();
+        var report = new PreviewReport();
+
+        ProblemReports.AddTo(report, (await problems.ReceiveAsync(Post("""{"tab":"t","kind":"load-error","message":"boom (line 2)","source":"uncaught","line":2,"column":5}""")))!);
+        ProblemReports.AddTo(report, (await problems.ReceiveAsync(Post("""{"tab":"t","kind":"error","message":"y is null (line 4)","source":"uncaught","line":4,"file":"/app.js"}""")))!);
+
+        Assert.Collection(report.Entries,
+            e => Assert.Equal((true, ErrorSource.Uncaught, new SourcePosition(2, 5)), (((PreviewError)e).WhileLoading, ((PreviewError)e).Source, ((PreviewError)e).Position)),
+            e => Assert.Equal((false, ErrorSource.Uncaught, new SourcePosition(4, null, "/app.js")), (((PreviewError)e).WhileLoading, ((PreviewError)e).Source, ((PreviewError)e).Position)));
+    }
+
+    [Fact]
+    public void How_many_entries_a_preview_keeps_is_the_hosts_choice()
+    {
+        var previews = new PreviewOrigins<int>(new PreviewOptions { MaxReportEntries = 2 });
+        var report = previews.Create(1).Report;
+
+        report.AddError("a");
+        report.AddError("b");
+        report.AddError("c");
+
+        Assert.Equal(2, report.MaxEntries);
+        Assert.Equal(["a", "b"], report.Errors);
+        Assert.Equal(1, report.Dropped);
+        Assert.False(report.IsEmpty);
+        Assert.Throws<ArgumentException>(() => new PreviewOrigins<int>(new PreviewOptions { MaxReportEntries = 0 }));
     }
 
     private static DefaultHttpContext Post(string body, bool header = true, string? origin = null)

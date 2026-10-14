@@ -16,6 +16,9 @@ namespace LocalOrigin.AspNetCore.Previews;
 /// <c>{ "tab": "...", "kind": "load-error", "message": "..." }</c>,
 /// <c>{ "tab": "...", "kind": "error", "message": "..." }</c> or
 /// <c>{ "tab": "...", "kind": "blocked", "category": "library" | "data" | "form", "host": "..." }</c>,
+/// an error optionally with <c>"source": "uncaught" | "rejection" | "console" | "resource"</c> and
+/// <c>"line"</c>, <c>"column"</c> and <c>"file"</c> (see <see cref="SourcePosition"/>) — a field that is unknown or
+/// out of range is left out rather than refusing the report;
 /// answered with <c>{}</c> — 200 with a body rather than 204: a fetch answered with 204 was observed to keep a
 /// Chromium-family browser from shutting down cleanly.
 /// </remarks>
@@ -23,6 +26,9 @@ public sealed class ProblemReports
 {
     /// <summary>The longest error message kept.</summary>
     public const int MaxMessageLength = 500;
+
+    /// <summary>The longest file path an error's position keeps.</summary>
+    public const int MaxFileLength = 1024;
 
     private static readonly Lazy<string> ScriptTemplate = new(() =>
     {
@@ -87,9 +93,9 @@ public sealed class ProblemReports
         PageProblem? problem = wire switch
         {
             { Tab: not null, Kind: "load-error", Message: { Length: > 0 } message } =>
-                new PageLoadError(wire.Tab, Bounded(message)),
+                new PageLoadError(wire.Tab, Bounded(message)) { Source = ParseSource(wire.Source), Position = ParsePosition(wire) },
             { Tab: not null, Kind: "error", Message: { Length: > 0 } message } =>
-                new PageError(wire.Tab, Bounded(message)),
+                new PageError(wire.Tab, Bounded(message)) { Source = ParseSource(wire.Source), Position = ParsePosition(wire) },
             { Tab: not null, Kind: "blocked", Host: { Length: > 0 and <= 255 } host } when ParseCategory(wire.Category) is { } category =>
                 new PageBlocked(wire.Tab, new BlockedRequest(category, host)),
             _ => null,
@@ -120,6 +126,22 @@ public sealed class ProblemReports
 
     private static string Bounded(string message) => message.Length > MaxMessageLength ? message[..MaxMessageLength] : message;
 
+    private static ErrorSource? ParseSource(string? source) => source switch
+    {
+        "uncaught" => ErrorSource.Uncaught,
+        "rejection" => ErrorSource.Rejection,
+        "console" => ErrorSource.Console,
+        "resource" => ErrorSource.Resource,
+        _ => null,
+    };
+
+    // A path of the page's origin ("/app.js"), or none for the page's own file.
+    private static SourcePosition? ParsePosition(Wire wire) =>
+        wire.Line is > 0 and var line
+        && wire.File is null or { Length: > 0 and <= MaxFileLength } and ['/', ..]
+            ? new SourcePosition(line, wire.Column is > 0 ? wire.Column : null, wire.File)
+            : null;
+
     private static BlockedCategory? ParseCategory(string? category) => category switch
     {
         "library" => BlockedCategory.Library,
@@ -128,7 +150,8 @@ public sealed class ProblemReports
         _ => null,
     };
 
-    internal sealed record Wire(string? Tab, string? Kind, string? Message, string? Category, string? Host);
+    internal sealed record Wire(string? Tab, string? Kind, string? Message, string? Category, string? Host,
+        string? Source = null, int? Line = null, int? Column = null, string? File = null);
 
     internal sealed record Boot(string Endpoint, string Header, string Tab, int LineOffset);
 }
@@ -137,13 +160,49 @@ public sealed class ProblemReports
 public abstract record PageProblem(string Tab);
 
 /// <summary>An error the page's own code threw while loading, with lines counted as in the page's file.</summary>
-public sealed record PageLoadError(string Tab, string Message) : PageProblem(Tab);
+public sealed record PageLoadError(string Tab, string Message) : PageProblem(Tab)
+{
+    /// <summary>Where it came from, when the page said.</summary>
+    public ErrorSource? Source { get; init; }
+
+    /// <summary>Where in the code, when the browser gave it.</summary>
+    public SourcePosition? Position { get; init; }
+}
 
 /// <summary>
 /// An error after the page loaded — one its own code threw (lines counted as in the page's file), or one it
 /// reported with <c>console.error</c>, at any time. The page started; something it does went wrong.
 /// </summary>
-public sealed record PageError(string Tab, string Message) : PageProblem(Tab);
+public sealed record PageError(string Tab, string Message) : PageProblem(Tab)
+{
+    /// <summary>Where it came from, when the page said.</summary>
+    public ErrorSource? Source { get; init; }
+
+    /// <summary>Where in the code, when the browser gave it.</summary>
+    public SourcePosition? Position { get; init; }
+}
+
+/// <summary>Where a page's error came from.</summary>
+public enum ErrorSource
+{
+    /// <summary>An error its code threw and nothing caught.</summary>
+    Uncaught,
+
+    /// <summary>A promise its code rejected and nothing handled.</summary>
+    Rejection,
+
+    /// <summary>An error the page reported itself with <c>console.error</c>.</summary>
+    Console,
+
+    /// <summary>A script, style sheet or other file from another host that could not be loaded.</summary>
+    Resource,
+}
+
+/// <summary>Where in a page's code an error was thrown.</summary>
+/// <param name="Line">The line, counted as in that file (1-based) — for the page's own file, without the markup placed in front of it.</param>
+/// <param name="Column">The column (1-based), when the browser gave it.</param>
+/// <param name="File">The path of another file of the page's origin (<c>/app.js</c>), or <see langword="null"/> for the page's own file.</param>
+public sealed record SourcePosition(int Line, int? Column = null, string? File = null);
 
 /// <summary>Something the content security policy refused.</summary>
 public sealed record PageBlocked(string Tab, BlockedRequest Blocked) : PageProblem(Tab);

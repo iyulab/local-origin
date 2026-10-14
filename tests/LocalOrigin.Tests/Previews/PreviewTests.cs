@@ -189,6 +189,44 @@ public sealed class PreviewTests
     }
 
     [Fact]
+    public async Task An_error_carries_where_it_came_from_and_where_in_the_code()
+    {
+        var problems = new ProblemReports();
+
+        var inPage = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"load-error","message":"x is not defined (line 3)","source":"uncaught","line":3,"column":9}"""));
+        var inFile = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"error","message":"y is null (line 40)","source":"uncaught","line":40,"column":2,"file":"/app.js"}"""));
+        var rejected = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"error","message":"quota","source":"rejection"}"""));
+        var logged = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"error","message":"Cannot save","source":"console"}"""));
+        var missing = await problems.ReceiveAsync(Post("""{"tab":"t","kind":"load-error","message":"could not load https://cdn.example/a.js","source":"resource"}"""));
+
+        Assert.Equal(new PageLoadError("t", "x is not defined (line 3)") { Source = ErrorSource.Uncaught, Position = new SourcePosition(3, 9) }, inPage);
+        Assert.Equal(new PageError("t", "y is null (line 40)") { Source = ErrorSource.Uncaught, Position = new SourcePosition(40, 2, "/app.js") }, inFile);
+        Assert.Equal(new PageError("t", "quota") { Source = ErrorSource.Rejection }, rejected);
+        Assert.Equal(new PageError("t", "Cannot save") { Source = ErrorSource.Console }, logged);
+        Assert.Equal(new PageLoadError("t", "could not load https://cdn.example/a.js") { Source = ErrorSource.Resource }, missing);
+    }
+
+    [Theory]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","source":"worker","line":3}""", null, 3, null)]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","source":"console","line":0,"column":4}""", ErrorSource.Console, null, null)]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","line":5,"column":-1}""", null, 5, null)]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","line":5,"file":"https://cdn.example/a.js"}""", null, null, null)]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","line":5,"file":""}""", null, null, null)]
+    [InlineData("""{"tab":"t","kind":"error","message":"m","column":7}""", null, null, null)]
+    public async Task A_field_that_is_unknown_or_out_of_range_is_left_out_not_refused(string body, ErrorSource? source, int? line, int? column)
+    {
+        var context = Post(body);
+
+        var error = (PageError?)await new ProblemReports().ReceiveAsync(context);
+
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.Equal(source, error!.Source);
+        Assert.Equal(line, error.Position?.Line);
+        Assert.Equal(column, error.Position?.Column);
+        Assert.Null(error.Position?.File);
+    }
+
+    [Fact]
     public async Task A_report_is_answered_with_a_body()
     {
         var context = Post("""{"tab":"t","kind":"load-error","message":"boom"}""");

@@ -125,7 +125,10 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   writes applied once, writes from revoked pages refused and reported, writes discarded for previews.
   Wire names and the global the host reads before closing a page are options.
 - `Previews.ProblemReports` — a script that reports the page's errors (thrown while loading, thrown afterwards,
-  or reported with `console.error`) and refused requests, and the endpoint that takes them in.
+  or reported with `console.error`) and refused requests, and the endpoint that takes them in. An error says where
+  it came from (`ErrorSource`: uncaught, rejection, console, or a file from another host that could not load) and,
+  when the browser gives it, where in the code (`SourcePosition`: line and column in the page's own file — markup
+  placed in front of it not counted — or in another file of its origin, by path).
 - `Files.FileChannel` — the file channel: `PUT` to the page's own address, confined to its folder, limited to the
   paths the host allows, atomic, size-capped; writes discarded for previews; the host told after each write.
 - `Files.ScopeFiles` — static serving of a scope's folder: `GET`/`HEAD` only, confined through `ScopeFolder`, the host

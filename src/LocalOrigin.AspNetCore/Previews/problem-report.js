@@ -8,6 +8,9 @@
 //  - load-error: the page's own code failed while loading.
 //  - error: the page's own code failed after it loaded (an uncaught error or rejection, say on a click),
 //    or the page reported an error itself with console.error, at any time.
+// An error also says where it came from (source: uncaught, rejection, console, or resource for a file
+// from another host that could not be loaded) and, when the browser gives it, where in the code: line
+// and column in the page's own file, or in another file of the page's origin named by its path.
 //
 // This file must stay ASCII: it is spliced into documents of any ASCII-compatible encoding.
 (function () {
@@ -17,23 +20,24 @@
   var headers = { "Content-Type": "application/json" };
   headers[boot.header] = "1";
 
-  function report(kind, message, category, host) {
+  function report(fields) {
+    fields.tab = boot.tab;
     nativeFetch(boot.endpoint, {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
       headers: headers,
-      body: JSON.stringify({ tab: boot.tab, kind: kind, message: message, category: category, host: host })
+      body: JSON.stringify(fields)
     }).catch(function () { /* reporting is best-effort */ });
   }
 
   var reported = {};
   var reports = 0;
-  function reportOnce(key, kind, message, category, host) {
+  function reportOnce(key, fields) {
     if (reported[key] || reports >= 20) return;
     reported[key] = true;
     reports++;
-    report(kind, message, category, host);
+    report(fields);
   }
 
   var blockedUrls = {};
@@ -46,17 +50,36 @@
     try { host = new URL(uri).host; } catch (e) { return; }
     var category = /^(script|style|font|worker|manifest)-src/.test(directive) ? "library"
       : /^form-action/.test(directive) ? "form" : "data";
-    reportOnce("blocked " + category + " " + host, "blocked", undefined, category, host);
+    reportOnce("blocked " + category + " " + host, { kind: "blocked", category: category, host: host });
   });
 
   var loading = true;
   // An error thrown while the page loads stopped it from starting; one thrown later broke one thing it does.
-  function onError(message) {
+  function onError(message, source, where) {
     if (!message) return;
-    reportOnce("error " + message, loading ? "load-error" : "error", String(message).slice(0, 500));
+    var fields = { kind: loading ? "load-error" : "error", message: String(message).slice(0, 500), source: source };
+    if (where && where.line > 0) {
+      fields.line = where.line;
+      if (where.column > 0) fields.column = where.column;
+      if (where.file) fields.file = where.file;
+    }
+    reportOnce("error " + message, fields);
   }
   function onLoadError(message) {
-    if (loading) onError(message);
+    if (loading) onError(message, "resource");
+  }
+  // Where a script error is, in terms of the page: its own file (the document, whatever its fragment),
+  // with lines counted as that file has them; another file of the page's origin, by path; nothing for
+  // a file from another host, whose positions would read as the page's.
+  var page = location.href.split("#")[0];
+  function position(filename, line, column) {
+    if (!filename) return null;
+    if (filename.split("#")[0] === page) return { line: line - boot.lineOffset, column: column };
+    try {
+      var url = new URL(filename, location.href);
+      if (url.origin === location.origin) return { line: line, column: column, file: url.pathname };
+    } catch (e) { /* not a URL: no position */ }
+    return null;
   }
   // Capturing on window also sees resources that failed to load, which do not bubble.
   window.addEventListener("error", function (event) {
@@ -72,12 +95,13 @@
     }
     if (!event.message) return;
     // Line numbers in the document count the injected markup too; report them as the page's file has them.
-    var line = event.lineno && event.filename === location.href ? event.lineno - boot.lineOffset : event.lineno;
-    onError(event.message + (line > 0 ? " (line " + line + ")" : ""));
+    var at = event.lineno ? position(event.filename, event.lineno, event.colno) : null;
+    var line = at ? at.line : event.lineno;
+    onError(event.message + (line > 0 ? " (line " + line + ")" : ""), "uncaught", at);
   }, true);
   window.addEventListener("unhandledrejection", function (event) {
     var reason = event.reason;
-    onError(reason && reason.message ? reason.message : String(reason));
+    onError(reason && reason.message ? reason.message : String(reason), "rejection");
   });
 
   // What the page itself reports as an error. The console still gets it as before.
@@ -92,7 +116,7 @@
       var parts = [];
       for (var i = 0; i < arguments.length; i++) parts.push(text(arguments[i]));
       var message = parts.join(" ");
-      if (message) reportOnce("error " + message, "error", message.slice(0, 500));
+      if (message) reportOnce("error " + message, { kind: "error", message: message.slice(0, 500), source: "console" });
     } catch (e) { /* reporting is best-effort */ }
     return nativeError.apply(console, arguments);
   };

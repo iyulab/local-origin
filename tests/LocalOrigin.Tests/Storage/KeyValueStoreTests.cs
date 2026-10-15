@@ -370,18 +370,123 @@ public sealed class KeyValueStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_journal_that_outgrows_the_snapshot_is_folded_before_the_operation_count_is_reached()
+    {
+        // A page that stores a whole list under one key rewrites that value on every change.
+        var options = new KeyValueStoreOptions { CheckpointJournalBytes = 16 * 1024, CheckpointJournalGrowth = 2 };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+        var list = new StringBuilder();
+        long largestJournal = 0;
+        for (var i = 0; i < 400; i++)
+        {
+            list.Append(System.Globalization.CultureInfo.InvariantCulture, $"{{\"id\":{i},\"title\":\"a record of some length\"}},");
+            await storage.ApplyAsync([KeyValueOperation.Set("list", list.ToString())]);
+            largestJournal = Math.Max(largestJournal, new FileInfo(Journal).Length);
+        }
+
+        Assert.Equal(400, storage.Sequence);          // under the default count of 1,000 — the size rule did the folding
+        Assert.True(File.Exists(Snapshot));
+        var snapshot = new FileInfo(Snapshot).Length;
+        // Bounded by the rule plus the one write that crossed it: never far past twice the snapshot.
+        Assert.True(largestJournal < 3 * snapshot + 64 * 1024, $"journal reached {largestJournal} B with a {snapshot} B snapshot");
+        Assert.Equal(list.ToString(), storage.GetItems()["list"]);
+    }
+
+    [Fact]
+    public async Task A_small_journal_is_not_folded_by_size()
+    {
+        await using var storage = await KeyValueStore.OpenAsync(_directory);
+        for (var i = 0; i < 50; i++) await storage.ApplyAsync([KeyValueOperation.Set("n", i.ToString(System.Globalization.CultureInfo.InvariantCulture))]);
+
+        Assert.False(File.Exists(Snapshot));          // a few hundred bytes stay in the journal until the count or a close
+    }
+
+    [Fact]
+    public async Task Closing_folds_the_journal_so_the_next_open_replays_nothing()
+    {
+        await using (var storage = await KeyValueStore.OpenAsync(_directory))
+        {
+            await storage.ApplyAsync([KeyValueOperation.Set("a", "1"), KeyValueOperation.Set("b", "2")]);
+        }
+
+        Assert.Equal(0, new FileInfo(Journal).Length);
+        Assert.Contains("\"b\": \"2\"", await File.ReadAllTextAsync(Snapshot), StringComparison.Ordinal);
+        await using var reopened = await KeyValueStore.OpenAsync(_directory);
+        Assert.Equal(new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, reopened.GetItems());
+        Assert.Equal(2, reopened.Sequence);
+        Assert.Empty(reopened.Recovery);
+    }
+
+    [Fact]
+    public async Task Closing_storage_that_was_never_written_creates_no_snapshot()
+    {
+        await using (await KeyValueStore.OpenAsync(_directory)) { }
+
+        Assert.False(File.Exists(Snapshot));
+    }
+
+    [Fact]
+    public async Task Opening_storage_whose_journal_already_outgrew_the_snapshot_folds_it()
+    {
+        // Written by an earlier version that folded by operation count only, then the process ended.
+        var value = new string('x', 8 * 1024);
+        using (var lines = new MemoryStream())
+        {
+            for (var i = 1; i <= 20; i++) StoreEncoding.WriteJournalLine(lines, i, KeyValueOperation.Set("big", value + i));
+            await File.WriteAllBytesAsync(Journal, lines.ToArray());
+        }
+
+        var options = new KeyValueStoreOptions { CheckpointJournalBytes = 64 * 1024 };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+
+        Assert.Equal(value + 20, storage.GetItems()["big"]);
+        Assert.Equal(20, storage.Sequence);
+        Assert.Equal(0, new FileInfo(Journal).Length);
+        Assert.True(File.Exists(Snapshot));
+    }
+
+    [Fact]
+    public async Task Frequent_size_folds_still_keep_one_version_per_day()
+    {
+        // Folding by size turns over versions/ faster; the newest version of each day must survive it.
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero));
+        var options = new KeyValueStoreOptions { CheckpointJournalBytes = 1, CheckpointJournalGrowth = 0, KeepRecentVersions = 3, KeepDailyVersionsForDays = 30, Clock = clock };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+        await storage.ApplyAsync([KeyValueOperation.Set("v", "day one")]);
+        await storage.ApplyAsync([KeyValueOperation.Set("v", "day one, last")]);
+        clock.Advance(TimeSpan.FromDays(1));
+        for (var i = 0; i < 30; i++) await storage.ApplyAsync([KeyValueOperation.Set("v", $"day two {i}")]);
+
+        var versions = Directory.GetFiles(Versions);
+        Assert.Contains(versions, v => Path.GetFileName(v).Contains("-20260901T", StringComparison.Ordinal));   // day one's newest survives day two's thirty folds
+        Assert.True(versions.Length <= 3 + 2, $"{versions.Length} versions kept");
+    }
+
+    [Fact]
     public async Task A_missing_snapshot_falls_back_to_the_newest_previous_version()
     {
         // The crash window inside a checkpoint: the old snapshot was moved into versions/ but the
         // new one was not yet renamed into place. The journal still holds everything after it.
-        await using (var storage = await KeyValueStore.OpenAsync(_directory))
+        // The process ends without closing (a clean close would fold the journal), so the files are
+        // taken as they are on disk while the storage is still open.
+        var crashed = Directory.CreateTempSubdirectory("local-origin-crashed-").FullName;
+        try
         {
+            var storage = await KeyValueStore.OpenAsync(_directory);
             await storage.ApplyAsync([KeyValueOperation.Set("a", "1")]);
             await storage.CheckpointAsync();
             await storage.ApplyAsync([KeyValueOperation.Set("b", "2")]);
+            Directory.CreateDirectory(Path.Combine(crashed, "versions"));
+            await CopyWhileOpenAsync(Snapshot, Path.Combine(crashed, "versions", "000000000001-20260101T000000Z.json"));
+            await CopyWhileOpenAsync(Journal, Path.Combine(crashed, "journal.ndjson"));
+            await storage.DisposeAsync();
+            Directory.Delete(_directory, recursive: true);
+            Directory.Move(crashed, _directory);
         }
-
-        File.Move(Snapshot, Path.Combine(Versions, "000000000001-20260101T000000Z.json"));
+        finally
+        {
+            if (Directory.Exists(crashed)) Directory.Delete(crashed, recursive: true);
+        }
 
         await using var reopened = await KeyValueStore.OpenAsync(_directory);
         Assert.Equal(new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, reopened.GetItems());

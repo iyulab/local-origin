@@ -9,6 +9,21 @@ public sealed record KeyValueStoreOptions
     /// </summary>
     public int CheckpointEvery { get; init; } = 1000;
 
+    /// <summary>
+    /// The journal is also folded into the snapshot once it holds at least this many bytes and at least
+    /// <see cref="CheckpointJournalGrowth"/> times the snapshot's size — whichever of this and
+    /// <see cref="CheckpointEvery"/> comes first. A page that rewrites one large value on every change
+    /// (a whole list stored under one key) otherwise keeps up to <see cref="CheckpointEvery"/> copies of
+    /// that value on disk and replays them all on the next open.
+    /// </summary>
+    public long CheckpointJournalBytes { get; init; } = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// How many times the snapshot's size the journal may grow to before it is folded, once it is past
+    /// <see cref="CheckpointJournalBytes"/>. Bounds the storage on disk to a few times the data it holds.
+    /// </summary>
+    public double CheckpointJournalGrowth { get; init; } = 2;
+
     /// <summary>How many of the most recent previous snapshots are always kept in <c>versions/</c>.</summary>
     public int KeepRecentVersions { get; init; } = 20;
 

@@ -39,16 +39,18 @@ public sealed class KeyValueStore : IAsyncDisposable
     private readonly Dictionary<string, string> _items;
     private FileStream _journal;
     private long _snapshotSequence;
+    private long _snapshotBytes;
     private int _journaledSinceSnapshot;
     private bool _disposed;
 
     private KeyValueStore(string directory, KeyValueStoreOptions options, Dictionary<string, string> items, long snapshotSequence,
-        long sequence, int journaledSinceSnapshot, FileStream journal, IReadOnlyList<StoreRecoveryEvent> recovery)
+        long snapshotBytes, long sequence, int journaledSinceSnapshot, FileStream journal, IReadOnlyList<StoreRecoveryEvent> recovery)
     {
         _directory = directory;
         _options = options;
         _items = items;
         _snapshotSequence = snapshotSequence;
+        _snapshotBytes = snapshotBytes;
         Sequence = sequence;
         _journaledSinceSnapshot = journaledSinceSnapshot;
         _journal = journal;
@@ -78,11 +80,14 @@ public sealed class KeyValueStore : IAsyncDisposable
         // and both a failed write and a checkpoint need to truncate.
         var journal = new FileStream(journalPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
         journal.Seek(0, SeekOrigin.End);
-        var storage = new KeyValueStore(directory, options, items, snapshotSequence, sequence, replayed, journal, recovery);
+        var snapshotFile = new FileInfo(Path.Combine(directory, SnapshotFile));
+        var storage = new KeyValueStore(directory, options, items, snapshotSequence, snapshotFile.Exists ? snapshotFile.Length : 0,
+            sequence, replayed, journal, recovery);
 
         // A set-aside journal or a fallback snapshot means the recovered state exists only in memory
-        // (or only in an old file); write it down now so the next load starts from it.
-        if (journalSetAside || recovery.Exists(e => e.Kind == StoreRecoveryKind.UsedPreviousSnapshot))
+        // (or only in an old file); write it down now so the next load starts from it. A journal that
+        // has already outgrown the snapshot is folded too, so the next open does not replay it again.
+        if (journalSetAside || recovery.Exists(e => e.Kind == StoreRecoveryKind.UsedPreviousSnapshot) || storage.JournalIsDue())
             await storage.CheckpointAsync(cancellationToken).ConfigureAwait(false);
 
         return storage;
@@ -220,7 +225,7 @@ public sealed class KeyValueStore : IAsyncDisposable
             Sequence += operations.Count;
             _journaledSinceSnapshot += operations.Count;
 
-            if (_journaledSinceSnapshot >= _options.CheckpointEvery)
+            if (JournalIsDue())
                 await CheckpointCoreAsync(cancellationToken).ConfigureAwait(false);
 
             return Sequence;
@@ -304,6 +309,16 @@ public sealed class KeyValueStore : IAsyncDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            // Closing cleanly folds what the journal holds, so the next open reads the snapshot alone.
+            // If that fails (a full disk), the journal stays as it is — exactly the state a crash leaves,
+            // which the next open recovers from.
+            try
+            {
+                if (Sequence != _snapshotSequence) await CheckpointCoreAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
             await _journal.DisposeAsync().ConfigureAwait(false);
         }
         finally
@@ -335,9 +350,18 @@ public sealed class KeyValueStore : IAsyncDisposable
         _journal.Seek(0, SeekOrigin.Begin);
         _journal.Flush(flushToDisk: true);
         _snapshotSequence = Sequence;
+        _snapshotBytes = bytes.Length;
         _journaledSinceSnapshot = 0;
 
         PruneVersions();
+    }
+
+    /// <summary>Whether the journal is due to be folded — by operation count, or by size against the snapshot.</summary>
+    private bool JournalIsDue()
+    {
+        if (_journaledSinceSnapshot >= _options.CheckpointEvery) return true;
+        var journalBytes = _journal.Length;
+        return journalBytes >= _options.CheckpointJournalBytes && journalBytes >= _options.CheckpointJournalGrowth * _snapshotBytes;
     }
 
     private string VersionPath(long sequence)

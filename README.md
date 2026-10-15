@@ -106,7 +106,10 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   `ScopeName` (DNS-label names), `IPortMemory` / `PortMemoryFile`, `RememberedPort.StartAsync` (start on the
   remembered port, retry briefly, otherwise move and report the move).
 - `Storage` — `KeyValueStore` (journal flushed before acknowledgement, atomic snapshots, previous snapshots
-  kept, unreadable files set aside and reported; snapshot format identifier is a host option),
+  kept, unreadable files set aside and reported; snapshot format identifier is a host option; the journal is
+  folded into the snapshot after `CheckpointEvery` operations or once it is past `CheckpointJournalBytes` and
+  `CheckpointJournalGrowth` times the snapshot — a page that rewrites one large value per change stays a few
+  times its data on disk — and again on a clean close and on opening a journal that has already outgrown it),
   `DurableFile` (atomic replace, shared reads, set aside).
 - `Previews` — `PreviewOrigins<T>` (throwaway scope names, a lifetime that is fixed or renewed on use, bound), `PreviewReport`
   (errors and refusals in arrival order as typed entries — numbered and stamped with when they arrived, an error with

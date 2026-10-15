@@ -210,11 +210,42 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
 
         _channel.Sessions.Revoke("notes");
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1")))).StatusCode);
+        await AssertRetiredAsync(await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"))));
         Assert.Empty(_refused); // a resend of what was applied is no loss
-        Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"), Set(2, "a", "2")))).StatusCode);
+        await AssertRetiredAsync(await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"), Set(2, "a", "2"))));
         Assert.Equal([("notes", 1L, 1)], _refused); // only what was never applied is handed over
         Assert.Equal("1", _stores["notes"].GetItems()["a"]);
+    }
+
+    [Fact]
+    public async Task A_refused_write_is_handed_over_once_however_often_it_is_resent()
+    {
+        var page = await LoadAsync("notes");
+        _channel.Sessions.Revoke("notes");
+
+        for (var i = 0; i < 3; i++)
+            await AssertRetiredAsync(await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"), Set(2, "b", "2"))));
+        await AssertRetiredAsync(await WriteAsync("notes", page, Batch(page.Tab, Set(1, "a", "1"), Set(2, "b", "2"), Set(3, "c", "3"))));
+
+        Assert.Equal([("notes", 0L, 2), ("notes", 0L, 1)], _refused); // the first two once, then only the new one
+        Assert.Empty(_stores["notes"].GetItems());
+    }
+
+    [Fact]
+    public async Task A_stranger_tab_is_still_forbidden_not_told_it_was_retired()
+    {
+        var page = await LoadAsync("notes");
+        _channel.Sessions.Revoke("notes");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await WriteAsync("notes", page, Batch(new string('0', 32), Set(1, "a", "1")))).StatusCode);
+        Assert.Empty(_refused);
+    }
+
+    private static async Task AssertRetiredAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement.GetProperty("retired").GetBoolean());
     }
 
     [Fact]
@@ -243,6 +274,7 @@ public sealed partial class StorageChannelTests : IAsyncLifetime
         Assert.DoesNotContain("__LOCAL_ORIGIN_BOOT__", script, StringComparison.Ordinal);
         Assert.Contains("\"handle\":\"__localOrigin\"", script, StringComparison.Ordinal);
         Assert.Contains("\"endpoint\":\"/.local-origin/storage\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"retiredEvent\":\"localoriginretired\"", script, StringComparison.Ordinal);
     }
 
     [Fact]

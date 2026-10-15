@@ -19,7 +19,9 @@ namespace LocalOrigin.AspNetCore.Storage;
 /// <c>{ "tab": "...", "ops": [ { "seq": 1, "op": "set", "key": "...", "value": "..." }, ... ], "issued": n }</c>
 /// (<c>issued</c>: the last sequence the page has issued so far; a batch with no operations only reports it,
 /// and <c>"left": true</c> marks the report a page sends once it has left, after which it issues nothing more),
-/// answered with <c>{ "ack": n }</c> — the highest sequence from that tab now on disk. Operations at or below
+/// answered with <c>{ "ack": n }</c> — the highest sequence from that tab now on disk — or, for a page whose scope
+/// was revoked (<see cref="ChannelSessions.Revoke"/>), with <c>409</c> and <c>{ "retired": true }</c>, after which
+/// the script stops resending and tells the page (<see cref="StorageChannelOptions.RetiredEvent"/>). Operations at or below
 /// the tab's acknowledged sequence are skipped, so a batch can be resent any number of times. A request must
 /// carry the scope's session cookie and the request header; a page on another origin can send neither (the
 /// cookie belongs to this origin, and the custom header would need a CORS preflight that is never granted).
@@ -75,7 +77,7 @@ public sealed partial class StorageChannel
     {
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentNullException.ThrowIfNull(items);
-        var boot = JsonSerializer.Serialize(new Boot(Options.Path, Options.RequestHeader, tab, items, Options.HandleName), BootJson.Default.Boot);
+        var boot = JsonSerializer.Serialize(new Boot(Options.Path, Options.RequestHeader, tab, items, Options.HandleName, Options.RetiredEvent), BootJson.Default.Boot);
         return ScriptTemplate.Value.Replace("__LOCAL_ORIGIN_BOOT__", boot, StringComparison.Ordinal);
     }
 
@@ -141,14 +143,35 @@ public sealed partial class StorageChannel
             // A page of this scope whose code was replaced while it was still writing: its write is refused —
             // the new code owns the data now — but it was a write the person made, so the host is handed what
             // was never applied, to keep aside or to count.
-            if (Sessions.Retired(scope, batch.Tab) is { } retired
-                && operations.Where(o => o.Sequence > retired.LastSequence).OrderBy(o => o.Sequence).Select(o => o.Operation!).ToList() is { Count: > 0 } unapplied)
+            // The answer says so (409, «retired»), so the page's script stops resending what can never be applied
+            // and tells the page, instead of retrying a refusal forever.
+            if (Sessions.Retired(scope, batch.Tab) is not { } retired)
             {
-                LogRefusedFromRetiredTab(logger, scope);
-                if (Options.RefusedFromRetiredTab is { } refused) await refused(new RefusedWrite(context, scope, retired, unapplied)).ConfigureAwait(false);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
             }
 
-            response.StatusCode = StatusCodes.Status403Forbidden;
+            await retired.Gate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
+            try
+            {
+                var handedThrough = Math.Max(retired.LastSequence, retired.HandedOver);
+                var unapplied = operations.Where(o => o.Sequence > handedThrough).OrderBy(o => o.Sequence).ToList();
+                if (unapplied.Count > 0)
+                {
+                    LogRefusedFromRetiredTab(logger, scope);
+                    if (Options.RefusedFromRetiredTab is { } refused)
+                        await refused(new RefusedWrite(context, scope, retired, unapplied.Select(o => o.Operation!).ToList())).ConfigureAwait(false);
+                    retired.HandedOver = unapplied[^1].Sequence;
+                }
+            }
+            finally
+            {
+                retired.Gate.Release();
+            }
+
+            response.StatusCode = StatusCodes.Status409Conflict;
+            response.ContentType = "application/json";
+            await response.WriteAsync("""{"retired":true}""", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -240,7 +263,7 @@ public sealed partial class StorageChannel
 
     internal sealed record WireOperation(long Seq, string? Op, string? Key, string? Value);
 
-    internal sealed record Boot(string Endpoint, string Header, string Tab, IReadOnlyDictionary<string, string> Items, string Handle);
+    internal sealed record Boot(string Endpoint, string Header, string Tab, IReadOnlyDictionary<string, string> Items, string Handle, string RetiredEvent);
 }
 
 /// <summary>A document's share of the storage channel: its tab, and the script to place in front of it.</summary>
@@ -281,10 +304,18 @@ public sealed record StorageChannelOptions
     /// <summary>
     /// Called when a page of a scope whose sessions were revoked (<see cref="ChannelSessions.Revoke"/>) sent writes
     /// that were never applied. The writes are refused — the scope's new code owns its data — and handed to the
-    /// host, which decides whether to keep them aside, count them, or both. A resend of what was already applied
-    /// is not reported.
+    /// host, which decides whether to keep them aside, count them, or both. A resend of what was already applied,
+    /// or already handed over, is not reported again.
     /// </summary>
     public Func<RefusedWrite, ValueTask>? RefusedFromRetiredTab { get; init; }
+
+    /// <summary>
+    /// The event the script dispatches on <c>window</c> once its writes are refused because the scope was revoked
+    /// (its code replaced while the page was open). Cancelable: unless the page calls <c>preventDefault()</c>, the
+    /// script reloads the page, which then runs the new code on the data it owns. Writes the page makes after that
+    /// are sent once each and handed to the host like the rest, never retried.
+    /// </summary>
+    public string RetiredEvent { get; init; } = "localoriginretired";
 }
 
 /// <summary>Serialization of the channel's wire data.</summary>

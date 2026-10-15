@@ -33,8 +33,19 @@
     });
   }
 
+  // Set once the host answers that this page's scope was revoked: its writes can never be applied, so
+  // they are not retried (the host already holds them), and the page is told.
+  var retired = false;
+
   function post(ops, keepalive) {
     return send({ tab: boot.tab, ops: ops, issued: seq }, keepalive).then(function (response) {
+      if (response.status === 409) {
+        return response.json().then(function (body) {
+          var error = new Error("storage refused: the page's code was replaced");
+          error.retired = !!(body && body.retired);
+          throw error;
+        });
+      }
       if (!response.ok) throw new Error("storage request failed: " + response.status);
       return response.json();
     }).then(function (result) {
@@ -56,13 +67,26 @@
     var failed = false;
     post(ops.slice(), false).then(function () {
       retryDelay = 250;
-    }, function () {
+    }, function (error) {
+      if (error && error.retired) return onRetired();
       failed = true;
       retryDelay = Math.min(retryDelay * 2, 5000);
     }).then(function () {
       inflight = false;
-      if (unacked.length > 0 || queue.length > 0) schedule(failed ? retryDelay : 0);
+      if (!retired && (unacked.length > 0 || queue.length > 0)) schedule(failed ? retryDelay : 0);
     });
+  }
+
+  // The host refused these writes and kept them; nothing is resent. The page decides what happens next
+  // (preventDefault); by default it reloads and runs the new code on the data that code now owns.
+  function onRetired() {
+    if (retired) return;
+    retired = true;
+    unacked = [];
+    queue = [];
+    if (timer) { clearTimeout(timer); timer = 0; }
+    var event = new CustomEvent(boot.retiredEvent, { cancelable: true });
+    if (window.dispatchEvent(event)) window.location.reload();
   }
 
   function schedule(delay) {
@@ -76,6 +100,7 @@
 
   function flushOnLeave() {
     leaving = true;
+    if (retired) return;
     var ops = unacked.concat(queue);
     if (ops.length === 0) return;
     unacked = ops;
@@ -89,6 +114,11 @@
 
   function record(op) {
     op.seq = ++seq;
+    if (retired) {
+      // Sent once, so the host holds it with the rest; never retried, never acknowledged.
+      post([op], leaving && JSON.stringify(op).length < 60000).catch(function () { /* refused, as expected */ });
+      return;
+    }
     queue.push(op);
     if (leaving) {
       // Sent now, with keepalive, so it leaves before the document does, together with everything not

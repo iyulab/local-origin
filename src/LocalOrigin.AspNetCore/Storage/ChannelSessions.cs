@@ -96,4 +96,7 @@ public sealed class ChannelTab
 
     /// <summary>Whether the page's report sent after it left has arrived — then <see cref="Issued"/> is final.</summary>
     public bool Left { get; internal set; }
+
+    /// <summary>After a revoke: the highest sequence already handed to the host as refused, so a resend is not handed again.</summary>
+    internal long HandedOver { get; set; }
 }

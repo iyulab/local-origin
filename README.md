@@ -82,7 +82,8 @@ These are the anchors. An implementation that violates one of them is not local-
 4. **Data outlives the page.** Replacing or reverting a page's code never discards the data it wrote;
    data written by a version that is left behind is kept aside, not merged and not deleted. A page still
    running replaced code cannot write into the data the new code owns: its late writes are refused and
-   handed to the host, never silently dropped.
+   handed to the host once, never silently dropped — and the page is told (`409 { "retired": true }`, a
+   cancelable `localoriginretired` event; by default it reloads) instead of retrying a refusal forever.
 5. **Loopback by default.** Reaching an origin from beyond the machine is an explicit host decision,
    never a default.
 6. **No knowledge of its consumers.** Nothing here names or special-cases an application that uses it.

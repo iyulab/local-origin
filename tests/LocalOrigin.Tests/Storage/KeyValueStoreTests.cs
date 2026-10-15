@@ -536,6 +536,58 @@ public sealed class KeyValueStoreTests : IDisposable
         Assert.Equal(4, Directory.GetFiles(Versions).Length);
     }
 
+    [Fact]
+    public async Task Automatic_folds_in_a_burst_keep_one_version_per_span_so_older_states_stay()
+    {
+        // Three bursts of ten writes, each folding on its own, a second apart within a burst, five minutes apart.
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero));
+        var options = new KeyValueStoreOptions { CheckpointEvery = 1, KeepRecentVersions = 20, KeepDailyVersionsForDays = 0, Clock = clock };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+        for (var burst = 0; burst < 3; burst++)
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                await storage.ApplyAsync([KeyValueOperation.Set("n", $"{burst}-{i}")]);
+                clock.Advance(TimeSpan.FromSeconds(1));
+            }
+
+            clock.Advance(TimeSpan.FromMinutes(5));
+        }
+
+        // One version per burst, each the burst's latest state before the next fold.
+        var kept = Directory.GetFiles(Versions).Select(v => File.ReadAllText(v)).ToList();
+        Assert.Equal(3, kept.Count);
+        Assert.Contains(kept, v => v.Contains("\"n\": \"0-8\"", StringComparison.Ordinal));   // the first burst survives the later ones
+        Assert.Equal("2-9", storage.GetItems()["n"]);
+    }
+
+    [Fact]
+    public async Task An_explicit_checkpoint_keeps_its_version_and_only_automatic_ones_replace_each_other()
+    {
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero));
+        var options = new KeyValueStoreOptions { CheckpointEvery = 2, KeepDailyVersionsForDays = 0, Clock = clock };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+        foreach (var n in new[] { "one", "two", "three" }) await storage.ApplyAsync([KeyValueOperation.Set("n", n)]);   // folds after "two"
+        await storage.CheckpointAsync();                                                                               // by hand: keeps "two"
+        foreach (var n in new[] { "four", "five", "six", "seven" }) await storage.ApplyAsync([KeyValueOperation.Set("n", n)]);   // two automatic folds, same second
+
+        var kept = Directory.GetFiles(Versions).Select(v => File.ReadAllText(v)).ToList();
+        Assert.Contains(kept, v => v.Contains("\"two\"", StringComparison.Ordinal));     // made by hand — never replaced
+        Assert.Contains(kept, v => v.Contains("\"five\"", StringComparison.Ordinal));    // the later automatic one
+        Assert.DoesNotContain(kept, v => v.Contains("\"three\"", StringComparison.Ordinal)); // the earlier automatic one, replaced
+    }
+
+    [Fact]
+    public async Task Without_spacing_the_most_recent_versions_are_kept_however_close()
+    {
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero));
+        var options = new KeyValueStoreOptions { CheckpointEvery = 1, KeepRecentVersions = 5, KeepRecentVersionsApart = TimeSpan.Zero, KeepDailyVersionsForDays = 0, Clock = clock };
+        await using var storage = await KeyValueStore.OpenAsync(_directory, options);
+        for (var i = 0; i < 10; i++) await storage.ApplyAsync([KeyValueOperation.Set("n", $"{i}")]);
+
+        Assert.Equal(5, Directory.GetFiles(Versions).Length);
+    }
+
     private static async Task CopyWhileOpenAsync(string path, string copy)
     {
         await using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

@@ -42,6 +42,10 @@ public sealed class KeyValueStore : IAsyncDisposable
     private long _snapshotBytes;
     private int _journaledSinceSnapshot;
     private bool _disposed;
+    // The version the latest automatic fold made, and when the run of automatic folds it belongs to began:
+    // a later automatic fold within KeepRecentVersionsApart of that start replaces it.
+    private string? _autoVersion;
+    private DateTimeOffset _autoVersionsSince;
 
     private KeyValueStore(string directory, KeyValueStoreOptions options, Dictionary<string, string> items, long snapshotSequence,
         long snapshotBytes, long sequence, int journaledSinceSnapshot, FileStream journal, IReadOnlyList<StoreRecoveryEvent> recovery)
@@ -226,7 +230,7 @@ public sealed class KeyValueStore : IAsyncDisposable
             _journaledSinceSnapshot += operations.Count;
 
             if (JournalIsDue())
-                await CheckpointCoreAsync(cancellationToken).ConfigureAwait(false);
+                await CheckpointCoreAsync(cancellationToken, automatic: true).ConfigureAwait(false);
 
             return Sequence;
         }
@@ -314,7 +318,7 @@ public sealed class KeyValueStore : IAsyncDisposable
             // which the next open recovers from.
             try
             {
-                if (Sequence != _snapshotSequence) await CheckpointCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                if (Sequence != _snapshotSequence) await CheckpointCoreAsync(CancellationToken.None, automatic: true).ConfigureAwait(false);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -327,10 +331,14 @@ public sealed class KeyValueStore : IAsyncDisposable
         }
     }
 
-    private async Task CheckpointCoreAsync(CancellationToken cancellationToken)
+    private async Task CheckpointCoreAsync(CancellationToken cancellationToken, bool automatic = false)
     {
         var snapshotPath = Path.Combine(_directory, SnapshotFile);
         if (Sequence == _snapshotSequence && File.Exists(snapshotPath)) return;
+
+        var now = _options.Clock.GetUtcNow();
+        var replaces = automatic && _autoVersion is not null && now - _autoVersionsSince < _options.KeepRecentVersionsApart
+            ? _autoVersion : null;
 
         // Order matters for crash safety. The journal is emptied last, so at every point either the
         // current snapshot or a previous one, plus the untouched journal, reproduces the state.
@@ -342,8 +350,12 @@ public sealed class KeyValueStore : IAsyncDisposable
             stream.Flush(flushToDisk: true);
         }
 
+        string? version = null;
         if (File.Exists(snapshotPath))
-            File.Move(snapshotPath, VersionPath(_snapshotSequence), overwrite: true);
+        {
+            version = VersionPath(_snapshotSequence);
+            File.Move(snapshotPath, version, overwrite: true);
+        }
         File.Move(temporary, snapshotPath, overwrite: true);
 
         _journal.SetLength(0);
@@ -352,6 +364,17 @@ public sealed class KeyValueStore : IAsyncDisposable
         _snapshotSequence = Sequence;
         _snapshotBytes = bytes.Length;
         _journaledSinceSnapshot = 0;
+
+        // Only now, with the new snapshot in place and the journal emptied, is the version an earlier automatic
+        // fold made within the span let go — until here it was a fallback for the crash window above.
+        if (replaces is not null && version is not null && !string.Equals(replaces, version, StringComparison.OrdinalIgnoreCase))
+            File.Delete(replaces);
+        if (!automatic) _autoVersion = null;
+        else if (version is not null)
+        {
+            if (replaces is null) _autoVersionsSince = now;
+            _autoVersion = version;
+        }
 
         PruneVersions();
     }

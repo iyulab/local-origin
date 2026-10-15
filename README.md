@@ -110,7 +110,9 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   kept, unreadable files set aside and reported; snapshot format identifier is a host option; the journal is
   folded into the snapshot after `CheckpointEvery` operations or once it is past `CheckpointJournalBytes` and
   `CheckpointJournalGrowth` times the snapshot — a page that rewrites one large value per change stays a few
-  times its data on disk — and again on a clean close and on opening a journal that has already outgrown it),
+  times its data on disk — and again on a clean close and on opening a journal that has already outgrown it;
+  folds the store makes on its own keep one previous snapshot per `KeepRecentVersionsApart`, so a burst of
+  writes does not push older states out of `versions/` — versions made by `CheckpointAsync`/`RestoreAsync` stay),
   `DurableFile` (atomic replace, shared reads, set aside).
 - `Previews` — `PreviewOrigins<T>` (throwaway scope names, a lifetime that is fixed or renewed on use, bound), `PreviewReport`
   (errors and refusals in arrival order as typed entries — numbered and stamped with when they arrived, an error with

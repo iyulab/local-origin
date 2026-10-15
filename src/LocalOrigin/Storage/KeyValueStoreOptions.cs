@@ -28,6 +28,16 @@ public sealed record KeyValueStoreOptions
     public int KeepRecentVersions { get; init; } = 20;
 
     /// <summary>
+    /// Folds the store makes on its own (after writes, on close, on open) keep at most one previous snapshot per
+    /// this span: a later automatic fold within it replaces the version the earlier one made. Without it a burst
+    /// of writes — folding the journal by size every few writes — would fill <see cref="KeepRecentVersions"/>
+    /// with states from the last few seconds and push out the ones an hour old. Versions made by
+    /// <see cref="KeyValueStore.CheckpointAsync"/> and <see cref="KeyValueStore.RestoreAsync"/> are never replaced.
+    /// <see cref="TimeSpan.Zero"/> keeps every version.
+    /// </summary>
+    public TimeSpan KeepRecentVersionsApart { get; init; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// For this many days back, the newest previous snapshot of each day is kept in addition to
     /// the most recent ones, so an older state stays recoverable after a burst of writes.
     /// </summary>

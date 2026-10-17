@@ -22,6 +22,22 @@ public sealed record OriginSecurityProfile
     public string ContentSecurityPolicy { get; init; } = DefaultContentSecurityPolicy;
 
     /// <summary>
+    /// Only the page's own origin. The content security policy does not govern WebRTC: without this, a page could
+    /// reach any address over a peer connection — a STUN server answers it from outside — past everything the policy
+    /// blocks.
+    /// </summary>
+    public const string DefaultConnectionAllowlist = "(response-origin)";
+
+    /// <summary>
+    /// The <c>Connection-Allowlist</c> of every response — the connections the page may open at all, WebRTC included —
+    /// or <see langword="null"/> (the default) for none. Off by default because it also stops the page from leaving:
+    /// following a link to another site ends on the browser's error page instead (measured in WebView2), so a host that
+    /// turns it on — usually with <see cref="DefaultConnectionAllowlist"/> — first sends outward links somewhere else,
+    /// such as a new window it opens itself.
+    /// </summary>
+    public string? ConnectionAllowlist { get; init; }
+
+    /// <summary>
     /// Whether a request another site's page makes — a script, an image, a <c>fetch</c> — is refused. The
     /// browser says where a request comes from in <c>Sec-Fetch-Site</c>; anything but the origin itself (or
     /// the person, typing an address) is refused, except navigating to the page. Sibling origins are
@@ -55,6 +71,7 @@ public sealed record OriginSecurityProfile
     {
         ArgumentNullException.ThrowIfNull(response);
         response.Headers.ContentSecurityPolicy = ContentSecurityPolicy;
+        if (ConnectionAllowlist is { } allowlist) response.Headers["Connection-Allowlist"] = allowlist;
         foreach (var (name, value) in IsolationHeaders) response.Headers[name] = value;
     }
 

@@ -18,7 +18,18 @@ public sealed class OriginSecurityProfileTests
         Assert.Equal("no-referrer", headers["Referrer-Policy"]);
         Assert.Equal("same-origin", headers["Cross-Origin-Resource-Policy"]);
         Assert.Equal("nosniff", headers.XContentTypeOptions);
+        Assert.False(headers.ContainsKey("Connection-Allowlist"));   // a host turns it on — it also stops links out
         Assert.False(headers.ContainsKey("Cross-Origin-Opener-Policy"));
+    }
+
+    [Fact]
+    public void A_host_that_turns_the_connection_allowlist_on_sends_it_on_every_response()
+    {
+        var context = new DefaultHttpContext();
+
+        new OriginSecurityProfile { ConnectionAllowlist = OriginSecurityProfile.DefaultConnectionAllowlist }.Apply(context.Response);
+
+        Assert.Equal("(response-origin)", context.Response.Headers["Connection-Allowlist"]);
     }
 
     [Fact]

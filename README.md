@@ -43,7 +43,7 @@ wrong. local-origin is that layer, once.
   An origin is remembered across restarts, because a page's stored data is keyed by its origin: an
   origin that moves silently loses the page's data.
 - **A static server with a security profile.** Serves a scope's files with a header set decided once:
-  a Content Security Policy chosen by the host, `Cross-Origin-Resource-Policy: same-origin`, refusal of
+  a Content Security Policy chosen by the host, a `Connection-Allowlist` when the host turns it on (WebRTC is outside the policy), `Cross-Origin-Resource-Policy: same-origin`, refusal of
   cross-site requests (`Sec-Fetch-Site`), `frame-ancestors`, and no referrer. Binds to loopback unless
   the host deliberately opens it.
 - **A durable write sink.** One store under each scope, written through a journal and atomic file

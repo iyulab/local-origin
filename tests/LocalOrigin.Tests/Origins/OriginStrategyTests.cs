@@ -68,7 +68,7 @@ public sealed class OriginStrategyTests
     [Theory]
     [InlineData("example.com")]
     [InlineData("notes.localhost")]
-    [InlineData("10.0.0.1")]
+    [InlineData("10.0.0.1")] // public-text: allow — the test is about an address used as a host name
     public void Port_origins_name_no_scope_for_a_host_name_that_is_not_their_address(string host)
     {
         var origins = new PortOrigins();

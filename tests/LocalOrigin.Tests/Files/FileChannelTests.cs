@@ -190,6 +190,52 @@ public sealed class FileChannelTests : IAsyncLifetime
         Assert.True(File.Exists(FileOf("notes", "saved/day/a.json")));
     }
 
+    /// <summary>A body that stops after its first bytes and runs <paramref name="midway"/> before the rest, so the server is already reading it.</summary>
+    private sealed class SlowBody(Action midway) : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            await stream.WriteAsync("ab"u8.ToArray());
+            await stream.FlushAsync();
+            await Task.Delay(300);   // the server has long since passed its pre-checks and is waiting for the rest
+            midway();
+            await stream.WriteAsync("cd"u8.ToArray());
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
+    }
+
+    [Fact]
+    public async Task A_folder_that_goes_away_while_the_body_is_in_flight_is_not_recreated_unless_the_host_lets_it()
+    {
+        Directory.CreateDirectory(FileOf("notes", "saved/day"));
+        var client = _app!.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Put, new Uri("http://notes.localhost/saved/day/a.json"))
+        {
+            Content = new SlowBody(() => Directory.Delete(FileOf("notes", "saved/day"))),
+        };
+        request.Headers.Add("X-Local-Origin", "1");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.False(Directory.Exists(FileOf("notes", "saved/day")));
+        Assert.Empty(_written);
+    }
+
+    [Fact]
+    public async Task A_short_name_is_refused_as_a_path_by_the_channel()
+    {
+        using var response = await PutAsync("notes", "/saved/REPORT~1.DOC", "x");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(_written);
+    }
+
     [Fact]
     public async Task A_preview_is_answered_as_if_written_and_keeps_nothing()
     {

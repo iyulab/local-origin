@@ -105,7 +105,14 @@ public sealed class FileChannel
         var created = !File.Exists(path.FullPath);
         if (write)
         {
-            Directory.CreateDirectory(directory);
+            // Checked before the body was read; the folder can go away while a slow body is in flight, and the host said not to create it.
+            if (Options.CreateFolders) Directory.CreateDirectory(directory);
+            else if (!Directory.Exists(directory))
+            {
+                response.StatusCode = StatusCodes.Status409Conflict;
+                return;
+            }
+
             // Not cancelled with the request: once the body is in, it is written through, so a page that stops
             // waiting (a closing window) cannot leave the write half-done.
             await DurableFile.WriteAtomicallyAsync(path.FullPath, body, CancellationToken.None).ConfigureAwait(false);

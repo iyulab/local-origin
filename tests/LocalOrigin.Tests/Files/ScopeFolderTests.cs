@@ -59,6 +59,34 @@ public sealed class ScopeFolderTests : IDisposable
         Assert.Null(new ScopeFolder(_root).Resolve(path));
     }
 
+    [Theory]
+    [InlineData("/PROGRA~1")]
+    [InlineData("/data/REPORT~1.DOC")]
+    [InlineData("/a~1")]
+    [InlineData("/ab~12.txt")]
+    [InlineData("/FI3A5~12.TXT")]
+    [InlineData("/x/progra~1/y.json")]
+    [InlineData("/ENV~1")]
+    [InlineData("/12345~67")]
+    public void A_name_shaped_like_a_windows_short_name_names_nothing(string path)
+    {
+        Assert.Null(new ScopeFolder(_root).Resolve(path));
+    }
+
+    [Theory]
+    [InlineData("/~1")]                          // nothing before the tilde: not an alias
+    [InlineData("/notes~.txt")]                  // no digits after the tilde
+    [InlineData("/report~draft.txt")]
+    [InlineData("/My Report~1.doc")]             // a space is not a short-name character
+    [InlineData("/longer-name~1.txt")]           // a base over eight characters
+    [InlineData("/a~1.html")]                    // an extension over three characters
+    [InlineData("/a~1.b.c")]                     // an alias has one dot at most
+    [InlineData("/FI3A5B~12.TXT")]               // nine characters: a base cannot hold more than eight
+    public void Names_that_only_resemble_a_short_name_are_still_served(string path)
+    {
+        Assert.NotNull(new ScopeFolder(_root).Resolve(path));
+    }
+
     [Fact]
     public void A_sibling_folder_sharing_the_name_prefix_is_not_inside()
     {

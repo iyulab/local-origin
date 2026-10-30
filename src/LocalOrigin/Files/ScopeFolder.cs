@@ -11,13 +11,20 @@ namespace LocalOrigin.Files;
 /// A path is refused when any segment is empty, <c>.</c> or <c>..</c>; holds a backslash, a colon (a drive or
 /// an alternate data stream), a wildcard, a control character or a character Windows forbids in names; ends in
 /// a dot or a space (Windows drops them, so <c>a.txt.</c> would reach <c>a.txt</c>); or is a reserved device
-/// name (<c>CON</c>, <c>NUL</c>, <c>COM1</c>, …, with or without an extension). The rules apply on every system,
+/// name (<c>CON</c>, <c>NUL</c>, <c>COM1</c>, …, with or without an extension); or has the shape of a Windows short
+/// (8.3) name — <c>PROGRA~1</c>, <c>REPORT~1.DOC</c>: such a name can be an alias for a longer one, which the file
+/// system resolves when the file is opened, so a name that cannot be told from an alias without asking the file system
+/// names nothing (a person's own <c>Report~1.doc</c> is refused with them). The rules apply on every system,
 /// so a folder behaves the same wherever it is served. A path whose existing part passes through a link or other
 /// reparse point is refused too: the link could lead anywhere.
 /// </remarks>
 public sealed class ScopeFolder
 {
     private static readonly SearchValues<char> Forbidden = SearchValues.Create("\\:*?\"<>|");
+
+    /// <summary>The characters a Windows short name is made of: letters, digits and <c>! # $ % &amp; ' ( ) - @ ^ _ ` { } ~</c> — no space, no other symbol.</summary>
+    private static readonly SearchValues<char> ShortNameCharacters =
+        SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'()-@^_`{}~");
 
     private static readonly HashSet<string> DeviceNames = new(
         ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
@@ -79,7 +86,23 @@ public sealed class ScopeFolder
         foreach (var c in segment)
             if (char.IsControl(c)) return false;
         var stem = segment.Split('.')[0].TrimEnd(' ');
-        return !DeviceNames.Contains(stem);
+        return !DeviceNames.Contains(stem) && !LooksLikeShortName(segment);
+    }
+
+    /// <summary>
+    /// An alias such as <c>PROGRA~1</c> or <c>FI3A5B~12.TXT</c>: at most one dot, a base of 1–8 characters of the short-name set that ends
+    /// in <c>~</c> and digits with at least one character before the <c>~</c>, an extension of at most three characters of the same set.
+    /// </summary>
+    private static bool LooksLikeShortName(string segment)
+    {
+        var dot = segment.IndexOf('.');
+        if (dot >= 0 && segment.IndexOf('.', dot + 1) >= 0) return false;
+        var stem = dot < 0 ? segment.AsSpan() : segment.AsSpan(0, dot);
+        var extension = dot < 0 ? default : segment.AsSpan(dot + 1);
+        if (stem.Length is < 3 or > 8 || extension.Length > 3) return false;
+        if (stem.ContainsAnyExcept(ShortNameCharacters) || extension.ContainsAnyExcept(ShortNameCharacters)) return false;
+        var tilde = stem.LastIndexOf('~');
+        return tilde >= 1 && tilde < stem.Length - 1 && !stem[(tilde + 1)..].ContainsAnyExceptInRange('0', '9');
     }
 }
 

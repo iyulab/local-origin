@@ -477,7 +477,8 @@ public sealed class KeyValueStore : IAsyncDisposable
                     stream.Flush(flushToDisk: true);
                 }
 
-                recovery.Add(new(StoreRecoveryKind.TruncatedJournalTail, $"Discarded an incomplete final journal line of {bytes.Length - position} bytes."));
+                recovery.Add(new(StoreRecoveryKind.TruncatedJournalTail, $"Discarded an incomplete final journal line of {bytes.Length - position} bytes.")
+                { LostOperations = 0 });
                 break;
             }
 
@@ -487,9 +488,14 @@ public sealed class KeyValueStore : IAsyncDisposable
 
             if (!StoreEncoding.TryReadJournalLine(line, out var sequence, out var operation))
             {
+                // Replay stops here and does not skip ahead: the unreadable line may have been a Remove or a Clear,
+                // and applying what follows without it would build a state that never existed. What follows stays
+                // in the set-aside file; it is only counted, so the loss can be reported exactly.
+                var lost = CountUnapplied(bytes, position, last);
                 var aside = DurableFile.SetAside(journalPath, options.Clock);
                 recovery.Add(new(StoreRecoveryKind.CorruptJournal,
-                    $"A journal line after sequence {last} could not be read; replay stopped there and the journal was set aside as {Path.GetFileName(aside)}."));
+                    $"A journal line after sequence {last} could not be read; replay stopped there, {lost} operation(s) were not applied, and the journal was set aside as {Path.GetFileName(aside)}.")
+                { LostOperations = lost });
                 return (last, replayed, true);
             }
 
@@ -501,7 +507,11 @@ public sealed class KeyValueStore : IAsyncDisposable
             }
 
             if (sequence != last + 1)
-                recovery.Add(new(StoreRecoveryKind.SequenceGap, $"Journal sequence jumped from {last} to {sequence}; {sequence - last - 1} operation(s) are missing."));
+            {
+                var missing = (int)Math.Min(sequence - last - 1, int.MaxValue);
+                recovery.Add(new(StoreRecoveryKind.SequenceGap, $"Journal sequence jumped from {last} to {sequence}; {missing} operation(s) are missing.")
+                { LostOperations = missing });
+            }
 
             operation!.ApplyTo(items);
             last = sequence;
@@ -509,6 +519,36 @@ public sealed class KeyValueStore : IAsyncDisposable
         }
 
         return (last, replayed, false);
+    }
+
+    /// <summary>
+    /// How many acknowledged operations a stop at an unreadable line leaves unapplied: the unreadable line itself
+    /// and every readable line after it that is newer than <paramref name="last"/>. Sequence numbers are contiguous,
+    /// so the highest one seen gives the same count when lines are unreadable in between.
+    /// </summary>
+    private static int CountUnapplied(byte[] bytes, int position, long last)
+    {
+        long lines = 1; // The unreadable line that stopped replay.
+        var highest = last;
+        while (position < bytes.Length)
+        {
+            var newline = Array.IndexOf(bytes, (byte)'\n', position);
+            if (newline < 0) break; // An incomplete final line was never acknowledged.
+
+            var line = bytes.AsSpan(position, newline - position);
+            position = newline + 1;
+            if (line.IsEmpty) continue;
+
+            if (!StoreEncoding.TryReadJournalLine(line, out var sequence, out _))
+                lines++;
+            else if (sequence > last)
+            {
+                lines++;
+                highest = Math.Max(highest, sequence);
+            }
+        }
+
+        return (int)Math.Min(Math.Max(highest - last, lines), int.MaxValue);
     }
 
     private static void TryTruncate(FileStream stream, long length)

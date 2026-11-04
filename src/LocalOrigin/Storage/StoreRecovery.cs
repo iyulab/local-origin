@@ -12,12 +12,13 @@ public enum StoreRecoveryKind
     /// <summary>
     /// A journal line other than the last could not be read. Replay stopped there and the journal
     /// was set aside unchanged, so the unread operations can still be inspected by hand.
+    /// <see cref="StoreRecoveryEvent.LostOperations"/> counts the operations that were not applied.
     /// </summary>
     CorruptJournal,
 
     /// <summary>
     /// Journal sequence numbers were not contiguous. Operations that should exist are missing,
-    /// so data may have been lost.
+    /// so data may have been lost. <see cref="StoreRecoveryEvent.LostOperations"/> is how many are missing.
     /// </summary>
     SequenceGap,
 
@@ -34,4 +35,12 @@ public enum StoreRecoveryKind
 /// <summary>One repair made while loading storage, with enough detail to explain it to a person.</summary>
 /// <param name="Kind">What happened.</param>
 /// <param name="Detail">A human-readable description, without stored keys or values.</param>
-public sealed record StoreRecoveryEvent(StoreRecoveryKind Kind, string Detail);
+public sealed record StoreRecoveryEvent(StoreRecoveryKind Kind, string Detail)
+{
+    /// <summary>
+    /// How many acknowledged operations this repair could not bring back: 0 when nothing acknowledged was lost,
+    /// <see langword="null"/> when the repair does not know (a fallback to an older snapshot loses whatever
+    /// the newer one held, and nothing says how much that was).
+    /// </summary>
+    public int? LostOperations { get; init; }
+}

@@ -228,12 +228,66 @@ public sealed class KeyValueStoreTests : IDisposable
         await using var storage = await KeyValueStore.OpenAsync(_directory);
 
         Assert.Equal(new Dictionary<string, string> { ["a"] = "1" }, storage.GetItems());
-        Assert.Equal(StoreRecoveryKind.CorruptJournal, Assert.Single(storage.Recovery).Kind);
+        var recovered = Assert.Single(storage.Recovery);
+        Assert.Equal(StoreRecoveryKind.CorruptJournal, recovered.Kind);
+        Assert.Equal(2, recovered.LostOperations); // the unreadable line and the readable one after it
         var aside = Assert.Single(Directory.GetFiles(_directory, "journal.ndjson.unreadable-*"));
         Assert.Contains("\"key\":\"c\"", await File.ReadAllTextAsync(aside), StringComparison.Ordinal);
 
         // The recovered state was written down, so it does not depend on the set-aside file.
         Assert.True(File.Exists(Snapshot));
+    }
+
+    [Fact]
+    public async Task Replay_stops_at_an_unreadable_line_even_when_a_later_line_would_clear_the_storage()
+    {
+        // The unreadable line could itself have been a Remove or a Clear. Applying what follows without it
+        // would build a state that never existed, so nothing after it is applied — only counted.
+        await File.WriteAllTextAsync(Journal, string.Join('\n',
+            "{\"seq\":1,\"op\":\"set\",\"key\":\"a\",\"value\":\"1\"}",
+            "{\"seq\":2,\"op\":\"set\",\"key\":\"b\",\"value\":\"2\"}",
+            "not json",
+            "{\"seq\":4,\"op\":\"clear\"}",
+            "{\"seq\":5,\"op\":\"set\",\"key\":\"c\",\"value\":\"3\"}",
+            "also not json",
+            "{\"seq\":7,\"op\":\"set\",\"key\":\"d\",\"value\":\"4\"}",
+            ""));
+
+        await using var storage = await KeyValueStore.OpenAsync(_directory);
+
+        Assert.Equal(new Dictionary<string, string> { ["a"] = "1", ["b"] = "2" }, storage.GetItems());
+        Assert.Equal(2, storage.Sequence);
+        var recovered = Assert.Single(storage.Recovery);
+        Assert.Equal(StoreRecoveryKind.CorruptJournal, recovered.Kind);
+        Assert.Equal(5, recovered.LostOperations); // sequences 3 to 7, two of them unreadable
+    }
+
+    [Fact]
+    public async Task An_unreadable_last_line_is_one_lost_operation()
+    {
+        await File.WriteAllTextAsync(Journal, string.Join('\n',
+            "{\"seq\":1,\"op\":\"set\",\"key\":\"a\",\"value\":\"1\"}",
+            "not json",
+            ""));
+
+        await using var storage = await KeyValueStore.OpenAsync(_directory);
+
+        Assert.Equal(1, Assert.Single(storage.Recovery).LostOperations);
+    }
+
+    [Fact]
+    public async Task Recovery_events_say_how_many_operations_they_lost()
+    {
+        await File.WriteAllTextAsync(Journal, string.Join('\n',
+            "{\"seq\":1,\"op\":\"set\",\"key\":\"a\",\"value\":\"1\"}",
+            "{\"seq\":4,\"op\":\"set\",\"key\":\"b\",\"value\":\"2\"}",
+            "{\"seq\":5,\"op\":\"set\",\"key\":\"c\",\"va"));
+
+        await using var storage = await KeyValueStore.OpenAsync(_directory);
+
+        Assert.Collection(storage.Recovery,
+            gap => { Assert.Equal(StoreRecoveryKind.SequenceGap, gap.Kind); Assert.Equal(2, gap.LostOperations); },
+            tail => { Assert.Equal(StoreRecoveryKind.TruncatedJournalTail, tail.Kind); Assert.Equal(0, tail.LostOperations); });
     }
 
     [Fact]

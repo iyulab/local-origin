@@ -1,7 +1,9 @@
 name: Publish to NuGet
 
 # Runs only when the declared version changes (or by hand). A version that already has a tag is skipped,
-# so re-running is safe.
+# so re-running is safe. This workflow holds no NuGet credential: it packs, uploads the packages as an artifact,
+# and the organization's central publisher (iyulab/nuget-publish) pushes them to nuget.org. The version tag is
+# pushed only after that publish succeeds.
 on:
   push:
     branches: [ main ]
@@ -14,12 +16,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  publish:
+  pack:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write   # push the version tag
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      exists: ${{ steps.check_tag.outputs.exists }}
 
     steps:
     - uses: actions/checkout@v4
@@ -75,12 +81,35 @@ jobs:
         done
         [ "$missing" -eq 0 ]
 
-    - name: Push to NuGet
+    # The central publisher accepts only .nupkg / .snupkg files in this artifact.
+    - name: Upload the packages
       if: steps.check_tag.outputs.exists == 'false'
-      run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: |
+          nupkg/*.nupkg
+          nupkg/*.snupkg
+        if-no-files-found: error
+        retention-days: 1
+
+  publish:
+    needs: pack
+    if: needs.pack.outputs.exists == 'false'
+    uses: iyulab/nuget-publish/.github/workflows/request.yml@2166748abf716fb58855228f65fc6b8f78c2780f # main
+    permissions: {}
+    secrets: inherit
+
+  tag:
+    needs: [pack, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # push the version tag
+    steps:
+    - uses: actions/checkout@v4
 
     - name: Tag the version
-      if: steps.check_tag.outputs.exists == 'false'
       run: |
-        git tag "v${{ steps.version.outputs.version }}"
-        git push origin "v${{ steps.version.outputs.version }}"
+        git tag "v${{ needs.pack.outputs.version }}"
+        git push origin "v${{ needs.pack.outputs.version }}"

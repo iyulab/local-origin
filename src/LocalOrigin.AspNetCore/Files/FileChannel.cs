@@ -13,7 +13,8 @@ namespace LocalOrigin.AspNetCore.Files;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A request must carry the request header (<see cref="FileChannelOptions.RequestHeader"/>, value <c>1</c>): a page
+/// A request must carry the request header (<see cref="FileChannelOptions.RequestHeader"/>, value <c>1</c>, or the scope's
+/// page key when <see cref="FileChannelOptions.Keys"/> is set): a page
 /// on another origin cannot add it without a CORS preflight, which is never granted. When the browser names an
 /// origin, it must be the one the request was sent to.
 /// </para>
@@ -64,7 +65,7 @@ public sealed class FileChannel
             return;
         }
 
-        if (!PageRequests.IsFromThePage(request, Options.RequestHeader))
+        if (!PageRequests.IsFromThePage(request, Options.RequestHeader, Options.Keys, scope))
         {
             response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -155,6 +156,13 @@ public sealed record FileChannelOptions
 {
     /// <summary>The custom header the page sends (with the value <c>1</c>), which another origin cannot send without a preflight.</summary>
     public string RequestHeader { get; init; } = "X-Local-Origin";
+
+    /// <summary>
+    /// When set, a write must carry the scope's page key as the header's value (<see cref="Keys.PageKeys"/>), not <c>1</c> —
+    /// so a program that reaches the port, under any account, cannot write. Open the page at <see cref="Keys.PageKeys.Address"/>
+    /// and place <see cref="Keys.PageKeys.Script"/> in front of it.
+    /// </summary>
+    public Keys.PageKeys? Keys { get; init; }
 
     /// <summary>The largest body accepted, in bytes. 10 MiB by default.</summary>
     public long MaxBytes { get; init; } = 10 * 1024 * 1024;

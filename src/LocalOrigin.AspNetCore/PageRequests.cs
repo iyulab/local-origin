@@ -13,6 +13,14 @@ internal static class PageRequests
     public static bool IsFromThePage(HttpRequest request, string header) =>
         request.Headers[header] == "1" && SameOriginOrAbsent(request);
 
+    /// <summary>
+    /// As <see cref="IsFromThePage(HttpRequest, string)"/>, and with <paramref name="keys"/> the header must hold
+    /// <paramref name="scope"/>'s page key instead of <c>1</c> (<see cref="Keys.PageKeys"/>) — a client that can reach the port
+    /// but was not handed the page's address cannot write.
+    /// </summary>
+    public static bool IsFromThePage(HttpRequest request, string header, Keys.PageKeys? keys, string scope) =>
+        keys is null ? IsFromThePage(request, header) : keys.Holds(request, scope, header) && SameOriginOrAbsent(request);
+
     /// <summary>Whether the browser names no origin, or the one the request was sent to.</summary>
     public static bool SameOriginOrAbsent(HttpRequest request)
     {

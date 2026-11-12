@@ -3,6 +3,20 @@
 All notable changes to the LocalOrigin packages are listed here. Versions follow
 [Semantic Versioning](https://semver.org/); before 1.0 a minor version may change behavior.
 
+## Unreleased
+
+### Added
+- `Keys.PageKeys`: page keys — what lets a write prove it comes from a page the host opened, not from any program that can
+  reach the port (a loopback port answers every account on the computer, and everything a page is served can be fetched by
+  any client). A scope's key is derived from the host's secret (HMAC-SHA256), so it survives a restart while the secret is
+  kept. `Address(url, scope)` puts the key in the address's fragment, which a browser never sends; `Script(header)`, placed
+  in front of the page before its own code, takes the key from there, keeps it for the tab, removes it from the address
+  bar, and sends it as the header's value on the page's same-origin `fetch` and `XMLHttpRequest` requests that carry the
+  header with the value `1` — a page written for the plain header saves unchanged.
+- `FileChannelOptions.Keys` and `StorageChannelOptions.Keys`: with keys, a write needs the scope's key as the header's
+  value; without, the plain header is taken as before. `StorageChannel.IsFromThePage(request, scope)` checks the key;
+  a preview's `DiscardAsync` still takes the plain header.
+
 ## 0.5.0
 
 ### Added

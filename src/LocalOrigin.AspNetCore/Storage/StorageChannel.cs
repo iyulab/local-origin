@@ -91,6 +91,17 @@ public sealed partial class StorageChannel
         return PageRequests.IsFromThePage(request, Options.RequestHeader);
     }
 
+    /// <summary>
+    /// As <see cref="IsFromThePage(HttpRequest)"/>, and with <see cref="StorageChannelOptions.Keys"/> set the header must hold
+    /// <paramref name="scope"/>'s page key — what <see cref="HandleAsync"/> checks.
+    /// </summary>
+    public bool IsFromThePage(HttpRequest request, string scope)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(scope);
+        return PageRequests.IsFromThePage(request, Options.RequestHeader, Options.Keys, scope);
+    }
+
     /// <summary>Whether <paramref name="context"/> carries a session of <paramref name="scope"/>, from a page of the origin it was sent to.</summary>
     public bool IsFromTheScope(HttpContext context, string scope)
     {
@@ -122,7 +133,7 @@ public sealed partial class StorageChannel
             return;
         }
 
-        if (!IsFromThePage(request))
+        if (!IsFromThePage(request, scope))
         {
             response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -286,6 +297,12 @@ public sealed record StorageChannelOptions
 
     /// <summary>The custom header the page's script sends (with the value <c>1</c>), which another origin cannot send without a preflight.</summary>
     public string RequestHeader { get; init; } = "X-Local-Origin";
+
+    /// <summary>
+    /// When set, a batch of writes must carry the scope's page key as the header's value (<see cref="Keys.PageKeys"/>);
+    /// a preview's <see cref="StorageChannel.DiscardAsync"/> still takes the plain header (its writes are kept by nobody).
+    /// </summary>
+    public Keys.PageKeys? Keys { get; init; }
 
     /// <summary>The name of the HTTP-only session cookie.</summary>
     public string SessionCookie { get; init; } = "local_origin_session";

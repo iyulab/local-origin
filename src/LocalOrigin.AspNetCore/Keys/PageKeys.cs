@@ -14,9 +14,10 @@ namespace LocalOrigin.AspNetCore.Keys;
 /// keeps out other origins in a browser, not other programs. A page key is the one thing that is never served: the host
 /// opens a page at <see cref="Address"/>, which carries the scope's key in the address's fragment (a browser never sends a
 /// fragment to the server), and <see cref="Script"/>, placed in front of the page before its own code, takes the key from
-/// there, keeps it for the tab (<c>sessionStorage</c>), removes it from the address bar, and sends it as the request header's
-/// value on the page's same-origin requests that carry the header with the value <c>1</c> — so a page written for the plain
-/// header saves unchanged.
+/// there, keeps it for the tab (<c>sessionStorage</c>), removes it from the address bar, and adds it in a header of its own
+/// (<see cref="KeyHeaderOf"/>) to the page's same-origin requests that carry the request header with the value <c>1</c> — so a
+/// page written for the plain header saves unchanged, and every check of the plain header (problem reports, a preview's
+/// discard, a host's own endpoints) goes on working in a keyed tab.
 /// </para>
 /// <para>
 /// A scope's key is derived from the host's secret (HMAC-SHA256), so it is the same after a restart as long as the host keeps
@@ -24,14 +25,22 @@ namespace LocalOrigin.AspNetCore.Keys;
 /// (<c>Keys</c> on their options); a channel without keys accepts the plain header as before.
 /// </para>
 /// <para>
-/// What it does not cover: reads (a <c>GET</c> needs no key), and a page opened at its address without the fragment (a
-/// bookmark, a typed address) — it has no key, and its writes are refused.
+/// What it does not cover: reads (a <c>GET</c> needs no key); a page opened at its address without the fragment (a
+/// bookmark, a typed address) — it has no key, and its writes are refused; and requests the script cannot see — from a
+/// <c>Worker</c>, or <c>navigator.sendBeacon</c> — which carry no key.
 /// </para>
 /// </remarks>
 public sealed class PageKeys
 {
     /// <summary>The fragment parameter that carries the key in an address the host opens.</summary>
     public const string FragmentParameter = "local-origin-key";
+
+    /// <summary>The header that carries the key, beside <paramref name="header"/> (which keeps the value <c>1</c>).</summary>
+    public static string KeyHeaderOf(string header)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(header);
+        return header + "-Key";
+    }
 
     /// <summary>The smallest secret accepted, in bytes.</summary>
     public const int MinSecretBytes = 32;
@@ -76,7 +85,8 @@ public sealed class PageKeys
     /// <summary>
     /// <paramref name="url"/> with <paramref name="scope"/>'s key in its fragment — the address to open the page at. A fragment
     /// the URL already has is kept; the script removes only the key. Hand this address only to what opens the page, never to
-    /// text a person or a model reads.
+    /// text a person or a model reads — and mind what records an address on the host's side before the script removes the key
+    /// (a browsing history, a session restore, an agent's view of the current address): such a record holds the key.
     /// </summary>
     public string Address(string url, string scope)
     {
@@ -86,19 +96,23 @@ public sealed class PageKeys
         return hash < 0 ? $"{url}#{key}" : hash == url.Length - 1 ? url + key : $"{url}&{key}";
     }
 
-    /// <summary>Whether <paramref name="request"/>'s <paramref name="header"/> holds <paramref name="scope"/>'s key.</summary>
+    /// <summary>
+    /// Whether <paramref name="request"/> carries <paramref name="scope"/>'s key in <paramref name="header"/>'s key header
+    /// (<see cref="KeyHeaderOf"/>). The plain header itself is checked by the channel.
+    /// </summary>
     public bool Holds(HttpRequest request, string scope, string header)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(header);
-        var sent = request.Headers[header];
+        var sent = request.Headers[KeyHeaderOf(header)];
         if (sent.Count != 1 || sent[0] is not { } value) return false;
         return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(value), Encoding.ASCII.GetBytes(KeyOf(scope)));
     }
 
     /// <summary>
     /// The script to place in front of a page, before any of its own code and before the channels' scripts (no
-    /// <c>&lt;script&gt;</c> element around it; ASCII). <paramref name="header"/> is the request header the page's writes carry.
+    /// <c>&lt;script&gt;</c> element around it; ASCII). <paramref name="header"/> is the request header the page's writes carry;
+    /// the script adds <see cref="KeyHeaderOf"/> beside it and leaves its value <c>1</c> as it is. A request it does not change
+    /// reaches the network exactly as the page made it.
     /// </summary>
     public static string Script(string header = "X-Local-Origin")
     {

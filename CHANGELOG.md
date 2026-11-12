@@ -11,11 +11,16 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
   any client). A scope's key is derived from the host's secret (HMAC-SHA256), so it survives a restart while the secret is
   kept. `Address(url, scope)` puts the key in the address's fragment, which a browser never sends; `Script(header)`, placed
   in front of the page before its own code, takes the key from there, keeps it for the tab, removes it from the address
-  bar, and sends it as the header's value on the page's same-origin `fetch` and `XMLHttpRequest` requests that carry the
-  header with the value `1` — a page written for the plain header saves unchanged.
-- `FileChannelOptions.Keys` and `StorageChannelOptions.Keys`: with keys, a write needs the scope's key as the header's
-  value; without, the plain header is taken as before. `StorageChannel.IsFromThePage(request, scope)` checks the key;
-  a preview's `DiscardAsync` still takes the plain header.
+  bar, and adds it in a header of its own (`KeyHeaderOf(header)`, `<header>-Key`) to the page's same-origin `fetch` and
+  `XMLHttpRequest` requests that carry the header with the value `1` — the `1` stays, so a page written for the plain header
+  saves unchanged and every check of the plain header (problem reports, a preview's discard) keeps working in a keyed tab.
+  A request the script does not change reaches the network as the page made it. Requests from a `Worker` and
+  `navigator.sendBeacon` carry no key.
+- `FileChannelOptions.Keys` and `StorageChannelOptions.Keys`: with keys, a write needs the plain header and the scope's key in
+  the key header; without, the plain header is taken as before. `StorageChannel.IsFromThePage(request, scope)` checks the
+  key; the scope-less `IsFromThePage(request)` throws on a channel with keys (it cannot check one); a preview's
+  `DiscardAsync` still takes the plain header. The storage channel's script sends the tab's key itself, so its writes do not
+  depend on the order of the scripts in front of the page.
 
 ## 0.5.0
 

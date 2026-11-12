@@ -5,6 +5,13 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
 
 ## Unreleased
 
+### Changed
+- `OriginSecurityProfile` refuses service worker scripts — requests marked `Service-Worker: script` or
+  `Sec-Fetch-Dest: serviceworker`, which a page sends when it registers or updates a worker — so registration fails. A worker answers
+  the origin's requests itself and could serve the page without the profile's content security policy,
+  and it stays registered after the page changes. New `RefuseServiceWorkers` (default `true`) turns it
+  off for a host whose pages need a worker. Hosts upgrading need no change unless their pages register one.
+
 ## 0.6.0
 
 ### Added

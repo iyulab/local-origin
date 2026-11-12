@@ -60,4 +60,31 @@ public sealed class OriginSecurityProfileTests
         Assert.Equal(refused, new OriginSecurityProfile().Refuses(context.Request));
         Assert.False(new OriginSecurityProfile { RefuseCrossSiteRequests = false }.Refuses(context.Request));
     }
+
+    [Theory]
+    [InlineData("same-origin", "script", "serviceworker")]
+    [InlineData(null, "script", "serviceworker")]
+    [InlineData("same-origin", "script", null)]
+    [InlineData("same-origin", null, "serviceworker")]
+    public void A_service_worker_script_is_refused_even_from_the_origin_itself(string? site, string? worker, string? dest)
+    {
+        var context = new DefaultHttpContext();
+        if (worker is not null) context.Request.Headers["Service-Worker"] = worker;
+        if (dest is not null) context.Request.Headers["Sec-Fetch-Dest"] = dest;
+        if (site is not null) context.Request.Headers["Sec-Fetch-Site"] = site;
+
+        Assert.True(new OriginSecurityProfile().Refuses(context.Request));
+        Assert.True(new OriginSecurityProfile { RefuseCrossSiteRequests = false }.Refuses(context.Request));
+        Assert.False(new OriginSecurityProfile { RefuseServiceWorkers = false }.Refuses(context.Request));
+    }
+
+    [Fact]
+    public void A_script_the_page_loads_itself_is_not_taken_for_a_service_worker()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Sec-Fetch-Site"] = "same-origin";
+        context.Request.Headers["Sec-Fetch-Dest"] = "script";
+
+        Assert.False(new OriginSecurityProfile().Refuses(context.Request));
+    }
 }

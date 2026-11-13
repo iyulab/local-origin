@@ -152,6 +152,11 @@ Target: .NET 10. Nullable reference types and warnings-as-errors are on.
   endpoint in the `Kestrel:Endpoints` configuration it supplies); open only once the server reports it, on the remembered
   port when it can, otherwise the first free port of an optional range or one the system picks.
 - `OriginRequests.ScopeOf(HttpRequest)`.
+- `Keys.PageKeys` — page keys for writes: a scope's key from the host's secret, the address that carries it in its
+  fragment, the script that adds it in a key header of its own (`<header>-Key`) beside the plain header, and the check the
+  file and storage channels apply when given keys. Reads need no key, and every check of the plain header (problem reports,
+  a preview's discard) works unchanged in a keyed tab. Not covered while keys are on: requests from a `Worker` and
+  `navigator.sendBeacon`, which the script cannot see — they carry no key, so their writes are refused.
 
 
 ## Deliberately undecided

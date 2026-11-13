@@ -83,12 +83,28 @@ public sealed partial class StorageChannel
 
     /// <summary>
     /// Whether <paramref name="request"/> carries the header only the page's own script sends, and — when the
-    /// browser names an origin — that origin is the one it was sent to.
+    /// browser names an origin — that origin is the one it was sent to. It does not check a page key, so a channel with
+    /// <see cref="StorageChannelOptions.Keys"/> refuses it: use <see cref="IsFromThePage(HttpRequest, string)"/>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The channel has <see cref="StorageChannelOptions.Keys"/>.</exception>
     public bool IsFromThePage(HttpRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (Options.Keys is not null)
+            throw new InvalidOperationException(
+                "This storage channel has page keys: the scope-less check would not check one. Call IsFromThePage(request, scope).");
         return PageRequests.IsFromThePage(request, Options.RequestHeader);
+    }
+
+    /// <summary>
+    /// As <see cref="IsFromThePage(HttpRequest)"/>, and with <see cref="StorageChannelOptions.Keys"/> set the request must also
+    /// carry <paramref name="scope"/>'s page key in the key header — what <see cref="HandleAsync"/> checks.
+    /// </summary>
+    public bool IsFromThePage(HttpRequest request, string scope)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(scope);
+        return PageRequests.IsFromThePage(request, Options.RequestHeader, Options.Keys, scope);
     }
 
     /// <summary>Whether <paramref name="context"/> carries a session of <paramref name="scope"/>, from a page of the origin it was sent to.</summary>
@@ -122,7 +138,7 @@ public sealed partial class StorageChannel
             return;
         }
 
-        if (!IsFromThePage(request))
+        if (!IsFromThePage(request, scope))
         {
             response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -210,7 +226,7 @@ public sealed partial class StorageChannel
     {
         ArgumentNullException.ThrowIfNull(context);
         var request = context.Request;
-        if (!HttpMethods.IsPost(request.Method) || !IsFromThePage(request))
+        if (!HttpMethods.IsPost(request.Method) || !PageRequests.IsFromThePage(request, Options.RequestHeader))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -286,6 +302,12 @@ public sealed record StorageChannelOptions
 
     /// <summary>The custom header the page's script sends (with the value <c>1</c>), which another origin cannot send without a preflight.</summary>
     public string RequestHeader { get; init; } = "X-Local-Origin";
+
+    /// <summary>
+    /// When set, a batch of writes must carry the scope's page key in the key header (<see cref="Keys.PageKeys"/>);
+    /// a preview's <see cref="StorageChannel.DiscardAsync"/> still takes the plain header (its writes are kept by nobody).
+    /// </summary>
+    public Keys.PageKeys? Keys { get; init; }
 
     /// <summary>The name of the HTTP-only session cookie.</summary>
     public string SessionCookie { get; init; } = "local_origin_session";

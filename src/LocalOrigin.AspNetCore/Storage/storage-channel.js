@@ -22,6 +22,12 @@
   var nativeFetch = window.fetch.bind(window);
   var headers = { "Content-Type": "application/json" };
   headers[boot.header] = "1";
+  // A page opened with a page key keeps it for the tab (Keys/page-key.js); the channel sends it itself, so its writes do not
+  // depend on which script took fetch first.
+  try {
+    var pageKey = window.sessionStorage.getItem("local-origin-key");
+    if (pageKey) headers[boot.header + "-Key"] = pageKey;
+  } catch (e) { /* no tab storage: the page-key script adds the key to the channel's requests */ }
 
   function send(body, keepalive) {
     return nativeFetch(boot.endpoint, {

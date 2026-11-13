@@ -5,6 +5,8 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
 
 ## Unreleased
 
+## 0.6.0
+
 ### Added
 - `Keys.PageKeys`: page keys — what lets a write prove it comes from a page the host opened, not from any program that can
   reach the port (a loopback port answers every account on the computer, and everything a page is served can be fetched by

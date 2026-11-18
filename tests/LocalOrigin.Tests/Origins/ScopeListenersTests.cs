@@ -142,6 +142,61 @@ public sealed class ScopeListenersTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_closed_scope_s_port_is_not_given_to_another_scope()
+    {
+        var first = FreePort();
+        await StartAsync(new ScopeListenerOptions { Ports = (first, first + 40) });
+        var notes = await _listeners.OpenAsync(Server, "notes", TestContext.Current.CancellationToken);
+        await _listeners.CloseAsync(Server, "notes", TestContext.Current.CancellationToken);
+
+        var board = await _listeners.OpenAsync(Server, "board", TestContext.Current.CancellationToken);
+        var reopened = await _listeners.OpenAsync(Server, "notes", TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(notes.Port, board.Port);
+        Assert.Equal(notes.Port, reopened.Port);
+        Assert.Null(reopened.PreviousPort);
+        Assert.Equal("notes", await GetAsync(reopened.Port));
+        Assert.Equal("board", await GetAsync(board.Port));
+    }
+
+    [Fact]
+    public async Task A_forgotten_scope_s_port_is_free_for_another()
+    {
+        var port = FreePort();
+        await StartAsync(new ScopeListenerOptions { Ports = (port, port) });
+        await _listeners.OpenAsync(Server, "notes", TestContext.Current.CancellationToken);
+        await _listeners.CloseAsync(Server, "notes", TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<IOException>(() => _listeners.OpenAsync(Server, "board", TestContext.Current.CancellationToken));
+
+        Assert.True(_listeners.Memory.Forget("notes"));
+        Assert.False(_listeners.Memory.Forget("notes"));
+        var board = await _listeners.OpenAsync(Server, "board", TestContext.Current.CancellationToken);
+
+        Assert.Equal(port, board.Port);
+        Assert.Equal("board", await GetAsync(port));
+    }
+
+    [Fact]
+    public async Task A_remembered_port_another_open_scope_holds_moves_the_scope_instead_of_failing()
+    {
+        // Two scopes remembering one port: what a memory written before ports were reserved can hold.
+        var first = FreePort();
+        File.WriteAllText(Path.Combine(_directory, "ports.json"),
+            $$"""{ "format": "local-origin.ports/0", "ports": { "board": {{first}}, "notes": {{first}} } }""");
+        await StartAsync(new ScopeListenerOptions { Ports = (first, first + 40) });
+        var board = await _listeners.OpenAsync(Server, "board", TestContext.Current.CancellationToken);
+
+        var notes = await _listeners.OpenAsync(Server, "notes", TestContext.Current.CancellationToken);
+
+        Assert.Equal(first, board.Port);
+        Assert.NotEqual(first, notes.Port);
+        Assert.Equal(first, notes.PreviousPort);
+        Assert.Equal("notes", await GetAsync(notes.Port));
+        Assert.Equal("board", await GetAsync(board.Port));
+        Assert.Equal(notes.Port, _listeners.Memory.Recall("notes"));
+    }
+
+    [Fact]
     public async Task A_port_range_gives_the_first_free_port_in_it()
     {
         var port = FreePort();

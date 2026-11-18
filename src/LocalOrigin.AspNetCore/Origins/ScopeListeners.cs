@@ -127,7 +127,7 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
     private async Task<int> ListenOnAnyAsync(IServerAddressesFeature addresses, string scope, CancellationToken cancellationToken)
     {
         IOException? last = null;
-        foreach (var port in Candidates())
+        foreach (var port in Candidates(scope))
         {
             try
             {
@@ -142,20 +142,29 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
         throw new IOException("No free port was found for the scope.", last);
     }
 
-    private IEnumerable<int> Candidates()
+    /// <summary>
+    /// The ports <paramref name="scope"/> may move to: none bound to a scope, and none remembered for another scope — a
+    /// closed scope keeps its port for when it opens again (<see cref="IPortMemory.Forget"/> frees it).
+    /// </summary>
+    private IEnumerable<int> Candidates(string scope)
     {
+        var taken = Origins.Bound.Values
+            .Concat(Memory.Remembered.Where(entry => entry.Key != scope).Select(entry => entry.Value))
+            .ToHashSet();
         if (Options.Ports is { } range)
         {
-            var bound = Origins.Bound.Values.ToHashSet();
             for (var port = range.First; port <= range.Last; port++)
-                if (!bound.Contains(port) && IsFree(port)) yield return port;
+                if (!taken.Contains(port) && IsFree(port)) yield return port;
             yield break;
         }
 
         // The operating system's choice, a few times over: the port is free when asked and can be taken before
         // the server binds it, in which case the next one is tried.
         for (var attempt = 0; attempt < 5; attempt++)
-            yield return AnyFreePort();
+        {
+            var port = AnyFreePort();
+            if (!taken.Contains(port)) yield return port;
+        }
     }
 
     /// <summary>A port the operating system chooses, released before it is returned so the server can bind it.</summary>
@@ -185,6 +194,9 @@ public sealed class ScopeListeners : IConfigurationSource, IDisposable
     /// <summary>Adds the endpoint and waits for the server to report it; on failure removes it and throws <see cref="IOException"/>.</summary>
     private async Task<int> ListenAsync(IServerAddressesFeature addresses, string scope, int port, CancellationToken cancellationToken)
     {
+        // Another scope's listener on the port is reported under the same address, which would read as this one bound.
+        if (Origins.Bound.FirstOrDefault(entry => entry.Value == port && entry.Key != scope).Key is { } holder)
+            throw new IOException($"Port {port} is held by scope '{holder}'.");
         var url = UrlOf(port);
         _provider.Set(KeyOf(scope), url);
         if (await WaitForAsync(addresses, url, reported: true, cancellationToken).ConfigureAwait(false)) return port;

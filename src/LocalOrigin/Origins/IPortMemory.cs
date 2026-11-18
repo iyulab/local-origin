@@ -13,4 +13,16 @@ public interface IPortMemory
 
     /// <summary>Remembers <paramref name="port"/> for <paramref name="key"/>. Complete when it returns.</summary>
     void Remember(string key, int port);
+
+    /// <summary>
+    /// Every key with a remembered port. A remembered port is reserved for its key: a listener that has to choose a port
+    /// does not choose one remembered for another key, so a key that is away for a while finds its port again.
+    /// </summary>
+    IReadOnlyDictionary<string, int> Remembered { get; }
+
+    /// <summary>
+    /// Forgets <paramref name="key"/>'s port, freeing it for other keys. For a key that is gone for good; one that is only
+    /// away keeps its port. Returns whether a port was remembered. Complete when it returns.
+    /// </summary>
+    bool Forget(string key);
 }

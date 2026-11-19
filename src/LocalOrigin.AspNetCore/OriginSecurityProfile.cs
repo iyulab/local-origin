@@ -47,6 +47,17 @@ public sealed record OriginSecurityProfile
     public bool RefuseCrossSiteRequests { get; init; } = true;
 
     /// <summary>
+    /// Whether the origin refuses to hand out a service worker script — a request the browser marks with
+    /// <c>Service-Worker: script</c> and <c>Sec-Fetch-Dest: serviceworker</c> when a page registers or updates a
+    /// worker (either is enough; WebKit and Chromium send both). A worker answers the origin's
+    /// requests itself: it can rebuild the page without the content security policy and keep doing so after the
+    /// page is changed or taken back, so the profile's headers would no longer decide what the page may reach.
+    /// Refusing the script makes registration fail. On by default; a host whose pages need a worker turns it off
+    /// and answers for what the worker serves.
+    /// </summary>
+    public bool RefuseServiceWorkers { get; init; } = true;
+
+    /// <summary>
     /// Headers every response carries, next to the content security policy.
     /// <list type="bullet">
     /// <item><c>Referrer-Policy: no-referrer</c> — following a link out would otherwise tell the other
@@ -75,10 +86,14 @@ public sealed record OriginSecurityProfile
         foreach (var (name, value) in IsolationHeaders) response.Headers[name] = value;
     }
 
-    /// <summary>Whether <paramref name="request"/> is one the origin refuses (see <see cref="RefuseCrossSiteRequests"/>).</summary>
+    /// <summary>
+    /// Whether <paramref name="request"/> is one the origin refuses (see <see cref="RefuseCrossSiteRequests"/> and
+    /// <see cref="RefuseServiceWorkers"/>).
+    /// </summary>
     public bool Refuses(HttpRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (RefuseServiceWorkers && (request.Headers["Service-Worker"] == "script" || request.Headers["Sec-Fetch-Dest"] == "serviceworker")) return true;
         if (!RefuseCrossSiteRequests) return false;
         var site = request.Headers["Sec-Fetch-Site"].ToString();
         if (site.Length == 0 || site is "same-origin" or "none") return false;

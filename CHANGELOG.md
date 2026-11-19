@@ -5,6 +5,8 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
 
 ## Unreleased
 
+## [0.7.0] - 2026-11-20
+
 ### Changed (breaking)
 - `IPortMemory` gains `Remembered` (every key with its port) and `Forget(key)`. A remembered port is now reserved for its
   key: `ScopeListeners` no longer gives a closed scope's port to another scope when that one has to choose a port, so a scope

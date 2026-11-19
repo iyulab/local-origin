@@ -41,6 +41,25 @@ public sealed class PortMemoryFile(string path, string format = PortMemoryFile.D
         }
     }
 
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, int> Remembered
+    {
+        get { lock (_lock) return Read(); }
+    }
+
+    /// <inheritdoc />
+    public bool Forget(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        lock (_lock)
+        {
+            var ports = Read();
+            if (!ports.Remove(key)) return false;
+            Write(ports);
+            return true;
+        }
+    }
+
     private SortedDictionary<string, int> Read()
     {
         var ports = new SortedDictionary<string, int>(StringComparer.Ordinal);

@@ -5,6 +5,18 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
 
 ## Unreleased
 
+### Changed (breaking)
+- `IPortMemory` gains `Remembered` (every key with its port) and `Forget(key)`. A remembered port is now reserved for its
+  key: `ScopeListeners` no longer gives a closed scope's port to another scope when that one has to choose a port, so a scope
+  closed for a while (a folder paused, say) opens again on its own port and origin. A scope gone for good is forgotten with
+  `Memory.Forget(scope)`, which frees its port. An `IPortMemory` of a host's own implements the two members.
+
+### Fixed
+- Opening a scope whose remembered port another open scope holds — what a memory written before ports were reserved can
+  contain — threw `InvalidOperationException` from `PortOrigins.Bind` («already belongs to scope»): the other scope's
+  listener is reported under the same address, so the port read as bound for the scope being opened. The port now counts as
+  taken and the scope moves to a free one (`ScopeListener.PreviousPort` says so).
+
 ## 0.6.0
 
 ### Added

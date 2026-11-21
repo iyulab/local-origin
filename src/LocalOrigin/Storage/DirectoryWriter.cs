@@ -9,14 +9,15 @@ namespace LocalOrigin.Storage;
 /// or another on the same computer — is refused with <see cref="DirectoryInUseException"/>.
 /// </summary>
 /// <remarks>
-/// The hold is a small mark file (computer, process id, the process's start time) created only if none is there, so one
-/// creator wins. It is never locked: copying or packaging the directory reads it like any other file. A mark whose process
-/// is no longer running — a crash, a killed process, a folder brought from another computer — is taken over. Disposing
+/// The hold is a small mark file (the directory's full path, computer, process id, the process's start time) created only if
+/// none is there, so one creator wins. It is never locked: copying or packaging the directory reads it like any other file. A
+/// mark whose process is no longer running — a crash, a killed process — or that was written for another place — a folder
+/// copied, packaged and taken in elsewhere, or brought from another computer — is taken over. Disposing
 /// removes the mark while it is still this writer's.
 /// </remarks>
 public sealed class DirectoryWriter : IDisposable
 {
-    private const string Format = "local-origin.writer/1";
+    private const string Format = "local-origin.writer/2";
 
     // Directories this process holds. A second hold in this process is refused without reading the file.
     private static readonly HashSet<string> Held = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -44,7 +45,7 @@ public sealed class DirectoryWriter : IDisposable
 
         try
         {
-            var mark = Own();
+            var mark = Own(key);
             for (var attempt = 0; ; attempt++)
             {
                 try
@@ -58,7 +59,7 @@ public sealed class DirectoryWriter : IDisposable
                     string held;
                     try { held = File.ReadAllText(key); }
                     catch (IOException) { continue; }   // the other writer is writing its mark — look again
-                    if (IsRunning(held)) throw new DirectoryInUseException(directory);
+                    if (IsRunning(held, key)) throw new DirectoryInUseException(directory);
                     try { File.Delete(key); }
                     catch (IOException) { }   // another opener took it over first — CreateNew decides
                 }
@@ -88,20 +89,22 @@ public sealed class DirectoryWriter : IDisposable
         lock (Held) Held.Remove(_path);
     }
 
-    private static string Own()
+    private static string Own(string path)
     {
         using var self = Process.GetCurrentProcess();
-        return string.Join('\n', Format, Environment.MachineName, self.Id.ToString(CultureInfo.InvariantCulture),
+        return string.Join('\n', Format, path, Environment.MachineName, self.Id.ToString(CultureInfo.InvariantCulture),
             self.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>Whether the process a mark names is still running on this computer (same id and start).</summary>
-    private static bool IsRunning(string mark)
+    /// <summary>Whether the mark at <paramref name="path"/> was written there by a process still running on this computer (same id and start).</summary>
+    private static bool IsRunning(string mark, string path)
     {
         var parts = mark.Split('\n');
-        if (parts.Length != 4 || parts[0] != Format || !string.Equals(parts[1], Environment.MachineName, StringComparison.OrdinalIgnoreCase)
-            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
-            || !long.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var started)) return false;
+        if (parts.Length != 5 || parts[0] != Format
+            || !string.Equals(parts[1], path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+            || !string.Equals(parts[2], Environment.MachineName, StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            || !long.TryParse(parts[4], NumberStyles.None, CultureInfo.InvariantCulture, out var started)) return false;
         try
         {
             using var process = Process.GetProcessById(id);

@@ -49,6 +49,26 @@ public sealed class KeyValueStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_copy_of_an_open_store_opens_elsewhere()
+    {
+        // A folder copied (or packaged and taken in) while its writer is open carries the writer's mark — that mark
+        // belongs to the original place, so the copy opens.
+        var copy = Directory.CreateTempSubdirectory("local-origin-kv-copy-").FullName;
+        try
+        {
+            await using var first = await KeyValueStore.OpenAsync(_directory);
+            await first.ApplyAsync([KeyValueOperation.Set("a", "1")]);
+            foreach (var file in Directory.EnumerateFiles(_directory)) File.Copy(file, Path.Combine(copy, Path.GetFileName(file)));
+            await using var second = await KeyValueStore.OpenAsync(copy);
+            Assert.Equal(1, second.Sequence);
+        }
+        finally
+        {
+            Directory.Delete(copy, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Closing_gives_the_directory_up()
     {
         await using (var first = await KeyValueStore.OpenAsync(_directory)) { }

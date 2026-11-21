@@ -10,8 +10,9 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
   the same process or another — with the new `StoreInUseException` (an `IOException`). Two writers of one directory used to
   load the same state and each fold their own copy on close, so the writer that closed last silently dropped the other's
   acknowledged operations; on macOS and Linux nothing stopped the second one opening the journal. The writer is a small
-  `writer.lock` mark (computer, process, process start) that is never locked, so copying or packaging the folder still reads it;
-  a mark whose process has stopped — a crash, a killed process, a folder brought from another computer — is taken over, and
+  `writer.lock` mark (the directory, computer, process, process start) that is never locked, so copying or packaging the folder still reads it;
+  a mark whose process has stopped (a crash, a killed process) or that was written for another place (a copied or packaged
+  folder taken in elsewhere, a folder from another computer) is taken over, and
   closing the store removes it. `PeekAsync` / `PeekKeysAsync` still read a directory another writer has open. A host that opens
   one directory twice must close the first store before opening it again.
 

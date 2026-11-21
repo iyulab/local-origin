@@ -15,6 +15,10 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
   closing the store removes it. `PeekAsync` / `PeekKeysAsync` still read a directory another writer has open. A host that opens
   one directory twice must close the first store before opening it again.
 
+### Added
+- `DirectoryWriter.Take(directory, markFile)` — the same one-writer hold for any directory a host owns (an app's data root, say),
+  with `DirectoryInUseException`. `KeyValueStore` takes its directory through it.
+
 ## [0.7.0] - 2026-11-20
 
 ### Changed (breaking)

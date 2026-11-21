@@ -5,6 +5,16 @@ All notable changes to the LocalOrigin packages are listed here. Versions follow
 
 ## Unreleased
 
+### Changed
+- `KeyValueStore.OpenAsync` takes the directory as its only writer before it reads anything, and refuses a second writer — in
+  the same process or another — with the new `StoreInUseException` (an `IOException`). Two writers of one directory used to
+  load the same state and each fold their own copy on close, so the writer that closed last silently dropped the other's
+  acknowledged operations; on macOS and Linux nothing stopped the second one opening the journal. The writer is a small
+  `writer.lock` mark (computer, process, process start) that is never locked, so copying or packaging the folder still reads it;
+  a mark whose process has stopped — a crash, a killed process, a folder brought from another computer — is taken over, and
+  closing the store removes it. `PeekAsync` / `PeekKeysAsync` still read a directory another writer has open. A host that opens
+  one directory twice must close the first store before opening it again.
+
 ## [0.7.0] - 2026-11-20
 
 ### Changed (breaking)

@@ -17,6 +17,45 @@ public sealed class KeyValueStoreTests : IDisposable
     private string Versions => Path.Combine(_directory, "versions");
 
     [Fact]
+    public async Task A_second_writer_of_the_same_directory_is_refused_and_the_first_keeps_every_acknowledged_write()
+    {
+        await using (var first = await KeyValueStore.OpenAsync(_directory))
+        {
+            await first.ApplyAsync([KeyValueOperation.Set("a", "1")]);
+
+            var refused = await Assert.ThrowsAsync<StoreInUseException>(() => KeyValueStore.OpenAsync(_directory));
+            Assert.Equal(_directory, refused.Directory);
+
+            await first.ApplyAsync([KeyValueOperation.Set("b", "2")]);
+            // Copying the folder (a package export, a duplicate) still reads every file while the writer is open.
+            foreach (var file in Directory.EnumerateFiles(_directory)) await File.ReadAllBytesAsync(file);
+            // Reading without opening still works while the writer is open.
+            Assert.Equal(["a", "b"], await KeyValueStore.PeekKeysAsync(_directory));
+        }
+
+        // Once the first writer is closed the directory opens again, with both writes.
+        await using var next = await KeyValueStore.OpenAsync(_directory);
+        Assert.Equal(2, next.Sequence);
+    }
+
+    [Fact]
+    public async Task A_mark_left_by_a_process_that_stopped_is_taken_over()
+    {
+        // A writer that crashed (or a folder copied from another computer) leaves its mark behind.
+        await File.WriteAllTextAsync(Path.Combine(_directory, "writer.lock"), "local-origin.writer/1\nanother-computer\n4242\n0");
+        await using var storage = await KeyValueStore.OpenAsync(_directory);
+        await storage.ApplyAsync([KeyValueOperation.Set("a", "1")]);
+        Assert.Equal(1, storage.Sequence);
+    }
+
+    [Fact]
+    public async Task Closing_gives_the_directory_up()
+    {
+        await using (var first = await KeyValueStore.OpenAsync(_directory)) { }
+        Assert.False(File.Exists(Path.Combine(_directory, "writer.lock")));
+    }
+
+    [Fact]
     public async Task New_storage_is_empty_and_reports_no_recovery()
     {
         await using var storage = await KeyValueStore.OpenAsync(_directory);

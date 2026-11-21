@@ -32,12 +32,15 @@ public sealed class KeyValueStore : IAsyncDisposable
     private const string SnapshotFile = "local.json";
     private const string JournalFile = "journal.ndjson";
     private const string VersionsDirectory = "versions";
+    private const string WriterFile = "writer.lock";
 
     private readonly string _directory;
     private readonly KeyValueStoreOptions _options;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, string> _items;
     private FileStream _journal;
+    // The mark this store wrote as the directory's writer (TakeWriter).
+    private readonly string _writer;
     private long _snapshotSequence;
     private long _snapshotBytes;
     private int _journaledSinceSnapshot;
@@ -48,8 +51,9 @@ public sealed class KeyValueStore : IAsyncDisposable
     private DateTimeOffset _autoVersionsSince;
 
     private KeyValueStore(string directory, KeyValueStoreOptions options, Dictionary<string, string> items, long snapshotSequence,
-        long snapshotBytes, long sequence, int journaledSinceSnapshot, FileStream journal, IReadOnlyList<StoreRecoveryEvent> recovery)
+        long snapshotBytes, long sequence, int journaledSinceSnapshot, FileStream journal, string writer, IReadOnlyList<StoreRecoveryEvent> recovery)
     {
+        _writer = writer;
         _directory = directory;
         _options = options;
         _items = items;
@@ -74,6 +78,92 @@ public sealed class KeyValueStore : IAsyncDisposable
         options ??= new KeyValueStoreOptions();
         Directory.CreateDirectory(Path.Combine(directory, VersionsDirectory));
 
+        // The writer is taken before anything is read: a second writer that loaded the state and then
+        // checkpointed would write its copy over the first writer's acknowledged operations.
+        var writer = TakeWriter(directory);
+        try
+        {
+            return await OpenAsWriterAsync(directory, options, writer, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            try { if (File.ReadAllText(Path.Combine(directory, WriterFile)) == writer) File.Delete(Path.Combine(directory, WriterFile)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            Release(Path.GetFullPath(directory));
+            throw;
+        }
+    }
+
+    // Directories this process holds as a writer — a second store in this process is refused without touching the file.
+    private static readonly HashSet<string> Held = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    /// <summary>
+    /// Takes the directory as its writer. The mark — this computer, process and the process's start — is created only
+    /// if no mark is there (one creator wins). A mark whose process is no longer running (a crash, a killed process,
+    /// a copy brought from another computer) is taken over. The file is never locked, so a folder copy or a package
+    /// export reads it like any other. Returns the mark written.
+    /// </summary>
+    private static string TakeWriter(string directory)
+    {
+        var key = Path.GetFullPath(directory);
+        lock (Held)
+        {
+            if (!Held.Add(key)) throw new StoreInUseException(directory);
+        }
+
+        try
+        {
+            var path = Path.Combine(directory, WriterFile);
+            var mark = WriterMark.Own();
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                        stream.Write(System.Text.Encoding.UTF8.GetBytes(mark));
+                    return mark;
+                }
+                catch (IOException) when (File.Exists(path) && attempt < 3)
+                {
+                    string held;
+                    try { held = File.ReadAllText(path); }
+                    catch (IOException) { continue; }   // the other writer is writing its mark — look again
+                    if (WriterMark.IsRunning(held)) throw new StoreInUseException(directory);
+                    try { File.Delete(path); }
+                    catch (IOException) { }   // another opener took it over first — CreateNew decides
+                }
+            }
+        }
+        catch
+        {
+            Release(key);
+            throw;
+        }
+    }
+
+    private static void Release(string key)
+    {
+        lock (Held) Held.Remove(key);
+    }
+
+    /// <summary>Gives up the directory: the mark is removed only while it is still this store's.</summary>
+    private void GiveUpWriter()
+    {
+        var path = Path.Combine(_directory, WriterFile);
+        try
+        {
+            if (File.Exists(path) && File.ReadAllText(path) == _writer) File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left behind, it names a process that has stopped and is taken over at the next open.
+        }
+
+        Release(Path.GetFullPath(_directory));
+    }
+
+    private static async Task<KeyValueStore> OpenAsWriterAsync(string directory, KeyValueStoreOptions options, string writer, CancellationToken cancellationToken)
+    {
         var recovery = new List<StoreRecoveryEvent>();
         var (snapshotSequence, items) = await LoadSnapshotAsync(directory, options, recovery, cancellationToken).ConfigureAwait(false);
 
@@ -86,7 +176,7 @@ public sealed class KeyValueStore : IAsyncDisposable
         journal.Seek(0, SeekOrigin.End);
         var snapshotFile = new FileInfo(Path.Combine(directory, SnapshotFile));
         var storage = new KeyValueStore(directory, options, items, snapshotSequence, snapshotFile.Exists ? snapshotFile.Length : 0,
-            sequence, replayed, journal, recovery);
+            sequence, replayed, journal, writer, recovery);
 
         // A set-aside journal or a fallback snapshot means the recovered state exists only in memory
         // (or only in an old file); write it down now so the next load starts from it. A journal that
@@ -324,6 +414,7 @@ public sealed class KeyValueStore : IAsyncDisposable
             {
             }
             await _journal.DisposeAsync().ConfigureAwait(false);
+            GiveUpWriter();
         }
         finally
         {
